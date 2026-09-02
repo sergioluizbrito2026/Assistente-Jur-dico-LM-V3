@@ -11,6 +11,7 @@ from services.documents import list_documents
 from services.evaluation import evaluate_answer
 from services.ingestion import ingest_document
 from services.rag_pipeline import rag_answer, retrieve_and_rerank
+from services.audit import audit
 
 # 1. Configuração única da página (deve ser a primeira chamada Streamlit)
 st.set_page_config(

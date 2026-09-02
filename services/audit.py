@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from db import get_connection
+from services.audit import audit
 
 def audit(user, action, entity_type, entity_id, metadata=None):
     with get_connection() as c:

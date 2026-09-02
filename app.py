@@ -2,12 +2,12 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+# Importações corrigidas conforme a localização real dos seus arquivos
 from services.audit import audit
-from cases import create_case, list_cases
-from db import init_db, seed_demo
-from documents import list_documents
-from services.auth import authenticate, get_current_user, logout
+from services.cases import create_case, list_cases
+from db import init_db, seed_demo  # db.py está na raiz
 from services.documents import list_documents
+from services.auth import authenticate, get_current_user, logout
 from services.evaluation import evaluate_answer
 from services.ingestion import ingest_document
 from services.rag_pipeline import rag_answer, retrieve_and_rerank
@@ -94,7 +94,6 @@ def page_title(title, subtitle=""):
 # --- ROTEAMENTO DAS PÁGINAS DO SISTEMA ---
 
 if page == "Dashboard":
-    # --- 1. CABEÇALHO ---
     col_head1, col_head2 = st.columns([0.7, 0.3])
     with col_head1:
         st.title("⚖️ Dashboard de Inteligência Jurídica")
@@ -115,7 +114,6 @@ if page == "Dashboard":
 
     st.markdown("---")
 
-    # --- 2. CARDS PRINCIPAIS (8 INDICADORES) ---
     st.markdown("### 📊 Indicadores Principais")
     metrics_cols = st.columns(8)
 
@@ -138,7 +136,6 @@ if page == "Dashboard":
 
     st.markdown("---")
 
-    # --- 3. STATUS DO PIPELINE RAG ---
     st.markdown("### 🧠 Pipeline de Inteligência RAG")
     pipeline_data = {
         "Etapa": [
@@ -171,7 +168,6 @@ if page == "Dashboard":
 
     st.markdown("---")
 
-    # --- 4 & 5. GRÁFICOS: DOCUMENTOS E PROCESSOS ---
     col_g1, col_g2 = st.columns(2)
 
     with col_g1:
@@ -198,7 +194,6 @@ if page == "Dashboard":
 
     st.markdown("---")
 
-    # --- 6. MAPA DE RISCOS JURÍDICOS ---
     st.markdown("### 🚨 Mapa de Riscos Jurídicos")
     r1, r2, r3, r4 = st.columns(4)
     with r1:
@@ -235,7 +230,6 @@ if page == "Dashboard":
 
     st.markdown("---")
 
-    # --- 7 & 10. QUALIDADE DA IA E CONFIGURAÇÕES DO ASSISTENTE ---
     col_ia1, col_ia2 = st.columns(2)
 
     with col_ia1:
@@ -262,7 +256,6 @@ if page == "Dashboard":
 
     st.markdown("---")
 
-    # --- 8 & 9. ATIVIDADE RECENTE E DOCUMENTOS RECENTES ---
     col_act1, col_act2 = st.columns(2)
 
     with col_act1:
@@ -294,7 +287,6 @@ if page == "Dashboard":
 
     st.markdown("---")
 
-    # --- 11. SAÚDE DA PLATAFORMA ---
     st.markdown("### 🛡️ Saúde da Plataforma")
     s1, s2, s3, s4, s5, s6 = st.columns(6)
     with s1:

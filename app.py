@@ -1,17 +1,18 @@
-import streamlit as st
 from pathlib import Path
-
-from db import init_db, seed_demo
-from services.auth import authenticate, get_current_user, logout
-from services.ingestion import ingest_document
-from services.rag_pipeline import rag_answer, retrieve_and_rerank
-from services.evaluation import evaluate_answer
-from services.documents import list_documents
-from services.cases import list_cases, create_case
-from services.audit import audit
 import pandas as pd
 import streamlit as st
 
+from audit import audit
+from cases import create_case, list_cases
+from db import init_db, seed_demo
+from documents import list_documents
+from services.auth import authenticate, get_current_user, logout
+from services.documents import list_documents
+from services.evaluation import evaluate_answer
+from services.ingestion import ingest_document
+from services.rag_pipeline import rag_answer, retrieve_and_rerank
+
+# 1. Configuração única da página (deve ser a primeira chamada Streamlit)
 st.set_page_config(
     page_title="Assistente Jurídico IA SaaS V3",
     page_icon="⚖️",
@@ -22,7 +23,8 @@ st.set_page_config(
 init_db()
 seed_demo()
 
-st.markdown("""
+st.markdown(
+    """
 <style>
 .stApp { background: #050d1a; }
 [data-testid="stSidebar"] { background: linear-gradient(180deg,#09152b,#050d1a); }
@@ -30,12 +32,19 @@ st.markdown("""
 [data-testid="stMetric"] { background:#0d1a30; border:1px solid #25385d; border-radius:14px; padding:14px; }
 .v3 { padding:10px 14px; border:1px solid #2a3f68; border-radius:12px; background:#0b1830; }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 user = get_current_user()
 if not user:
-    st.markdown("<h1 style='text-align:center;margin-top:90px'>⚖️ Assistente Jurídico IA SaaS V3</h1>", unsafe_allow_html=True)
-    st.caption("OCR → Chunking → Embeddings → Vector DB → Retriever → Reranker → LLM → Citações → Avaliação")
+    st.markdown(
+        "<h1 style='text-align:center;margin-top:90px'>⚖️ Assistente Jurídico IA SaaS V3</h1>",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "OCR → Chunking → Embeddings → Vector DB → Retriever → Reranker → LLM → Citações → Avaliação"
+    )
     with st.form("login"):
         email = st.text_input("E-mail", "admin@demo.local")
         password = st.text_input("Senha", "admin123", type="password")
@@ -63,7 +72,7 @@ with st.sidebar:
     for group, items in menus.items():
         st.caption(group)
         for item in items:
-            if st.button(item, key="nav_"+item, use_container_width=True):
+            if st.button(item, key="nav_" + item, use_container_width=True):
                 st.session_state.page = item
                 st.rerun()
 
@@ -75,236 +84,244 @@ with st.sidebar:
 
 page = st.session_state.page
 
+
 def page_title(title, subtitle=""):
     st.title(title)
     if subtitle:
         st.caption(subtitle)
-st.set_page_config(
-    page_title="Dashboard de Inteligência Jurídica",
-    page_icon="⚖️",
-    layout="wide",
-)
 
-# --- 1. CABEÇALHO ---
-col_head1, col_head2 = st.columns([0.7, 0.3])
-with col_head1:
-    st.title("⚖️ Dashboard de Inteligência Jurídica")
-    st.markdown(
-        "Visão executiva da operação jurídica, documentos, processos, riscos e desempenho da IA."
-    )
 
-with col_head2:
-    st.markdown("<br>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if st.button("🔄 Atualizar"):
-            st.rerun()
-    with c2:
-        st.markdown("**Período:** Hoje")
-    with c3:
-        st.markdown("**IA:** 🟢 Online")
+# --- ROTEAMENTO DAS PÁGINAS DO SISTEMA ---
 
-st.markdown("---")
+if page == "Dashboard":
+    # --- 1. CABEÇALHO ---
+    col_head1, col_head2 = st.columns([0.7, 0.3])
+    with col_head1:
+        st.title("⚖️ Dashboard de Inteligência Jurídica")
+        st.markdown(
+            "Visão executiva da operação jurídica, documentos, processos, riscos e desempenho da IA."
+        )
 
-# --- 2. CARDS PRINCIPAIS (8 INDICADORES) ---
-st.markdown("### 📊 Indicadores Principais")
-metrics_cols = st.columns(8)
+    with col_head2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("🔄 Atualizar"):
+                st.rerun()
+        with c2:
+            st.markdown("**Período:** Hoje")
+        with c3:
+            st.markdown("**IA:** 🟢 Online")
 
-with metrics_cols[0]:
-    st.metric(label="📄 Documentos", value="25")
-with metrics_cols[1]:
-    st.metric(label="📑 Chunks", value="148")
-with metrics_cols[2]:
-    st.metric(label="⚖️ Processos", value="18")
-with metrics_cols[3]:
-    st.metric(label="🔴 Riscos Críticos", value="2")
-with metrics_cols[4]:
-    st.metric(label="🟠 Riscos Altos", value="5")
-with metrics_cols[5]:
-    st.metric(label="🤖 Consultas IA", value="126")
-with metrics_cols[6]:
-    st.metric(label="🎯 Qualidade RAG", value="90%")
-with metrics_cols[7]:
-    st.metric(label="🟢 LLM", value="Conectado")
+    st.markdown("---")
 
-st.markdown("---")
+    # --- 2. CARDS PRINCIPAIS (8 INDICADORES) ---
+    st.markdown("### 📊 Indicadores Principais")
+    metrics_cols = st.columns(8)
 
-# --- 3. STATUS DO PIPELINE RAG ---
-st.markdown("### 🧠 Pipeline de Inteligência RAG")
-pipeline_data = {
-    "Etapa": [
-        "PDF/DOCX",
-        "OCR",
-        "Chunking",
-        "Embeddings",
-        "Vector DB",
-        "Retriever",
-        "Reranker",
-        "LLM",
-        "Citações",
-        "Avaliação",
-    ],
-    "Status": [
-        "🟢 OK",
-        "🟢 OK",
-        "🟢 OK",
-        "🟢 OK",
-        "🟢 OK (FAISS)",
-        "🟢 OK",
-        "🟢 OK",
-        "🟢 Conectado",
-        "🟢 OK",
-        "🟢 OK",
-    ],
-}
-df_pipeline = pd.DataFrame(pipeline_data)
-st.dataframe(df_pipeline.T, use_container_width=True)
+    with metrics_cols[0]:
+        st.metric(label="📄 Documentos", value="25")
+    with metrics_cols[1]:
+        st.metric(label="📑 Chunks", value="148")
+    with metrics_cols[2]:
+        st.metric(label="⚖️ Processos", value="18")
+    with metrics_cols[3]:
+        st.metric(label="🔴 Riscos Críticos", value="2")
+    with metrics_cols[4]:
+        st.metric(label="🟠 Riscos Altos", value="5")
+    with metrics_cols[5]:
+        st.metric(label="🤖 Consultas IA", value="126")
+    with metrics_cols[6]:
+        st.metric(label="🎯 Qualidade RAG", value="90%")
+    with metrics_cols[7]:
+        st.metric(label="🟢 LLM", value="Conectado")
 
-st.markdown("---")
+    st.markdown("---")
 
-# --- 4 & 5. GRÁFICOS: DOCUMENTOS E PROCESSOS ---
-col_g1, col_g2 = st.columns(2)
+    # --- 3. STATUS DO PIPELINE RAG ---
+    st.markdown("### 🧠 Pipeline de Inteligência RAG")
+    pipeline_data = {
+        "Etapa": [
+            "PDF/DOCX",
+            "OCR",
+            "Chunking",
+            "Embeddings",
+            "Vector DB",
+            "Retriever",
+            "Reranker",
+            "LLM",
+            "Citações",
+            "Avaliação",
+        ],
+        "Status": [
+            "🟢 OK",
+            "🟢 OK",
+            "🟢 OK",
+            "🟢 OK",
+            "🟢 OK (FAISS)",
+            "🟢 OK",
+            "🟢 OK",
+            "🟢 Conectado",
+            "🟢 OK",
+            "🟢 OK",
+        ],
+    }
+    df_pipeline = pd.DataFrame(pipeline_data)
+    st.dataframe(df_pipeline.T, use_container_width=True)
 
-with col_g1:
-    st.markdown("### 📚 Documentos na Base Jurídica")
-    docs_por_tipo = pd.DataFrame(
-        {"Tipo": ["PDF", "DOCX", "TXT"], "Quantidade": [12, 7, 3]}
-    )
-    st.bar_chart(docs_por_tipo.set_index("Tipo"))
+    st.markdown("---")
 
-with col_g2:
-    st.markdown("### ⚖️ Status dos Processos")
-    processos_status = pd.DataFrame(
+    # --- 4 & 5. GRÁFICOS: DOCUMENTOS E PROCESSOS ---
+    col_g1, col_g2 = st.columns(2)
+
+    with col_g1:
+        st.markdown("### 📚 Documentos na Base Jurídica")
+        docs_por_tipo = pd.DataFrame(
+            {"Tipo": ["PDF", "DOCX", "TXT"], "Quantidade": [12, 7, 3]}
+        )
+        st.bar_chart(docs_por_tipo.set_index("Tipo"))
+
+    with col_g2:
+        st.markdown("### ⚖️ Status dos Processos")
+        processos_status = pd.DataFrame(
+            {
+                "Status": [
+                    "Em andamento",
+                    "Em análise",
+                    "Aguardando",
+                    "Concluído",
+                ],
+                "Quantidade": [12, 5, 3, 8],
+            }
+        )
+        st.bar_chart(processos_status.set_index("Status"))
+
+    st.markdown("---")
+
+    # --- 6. MAPA DE RISCOS JURÍDICOS ---
+    st.markdown("### 🚨 Mapa de Riscos Jurídicos")
+    r1, r2, r3, r4 = st.columns(4)
+    with r1:
+        st.error("🔴 Crítico: 2")
+    with r2:
+        st.warning("🟠 Alto: 5")
+    with r3:
+        st.info("🟡 Médio: 8")
+    with r4:
+        st.success("🟢 Baixo: 12")
+
+    st.markdown("#### Principais Riscos Identificados")
+    riscos_detalhes = [
         {
-            "Status": [
-                "Em andamento",
-                "Em análise",
-                "Aguardando",
-                "Concluído",
-            ],
-            "Quantidade": [12, 5, 3, 8],
-        }
-    )
-    st.bar_chart(processos_status.set_index("Status"))
-
-st.markdown("---")
-
-# --- 6. MAPA DE RISCOS JURÍDICOS ---
-st.markdown("### 🚨 Mapa de Riscos Jurídicos")
-r1, r2, r3, r4 = st.columns(4)
-with r1:
-    st.error("🔴 Crítico: 2")
-with r2:
-    st.warning("🟠 Alto: 5")
-with r3:
-    st.info("🟡 Médio: 8")
-with r4:
-    st.success("🟢 Baixo: 12")
-
-st.markdown("#### Principais Riscos Identificados")
-riscos_detalhes = [
-    {
-        "Nível": "🔴 Crítico",
-        "Risco": "Cláusula de rescisão abusiva",
-        "Documento": "Contrato_Prestacao_Servicos.pdf",
-        "Página": 3,
-    },
-    {
-        "Nível": "🟠 Alto",
-        "Risco": "Proteção de dados inadequada",
-        "Documento": "Contrato_Prestacao_Servicos.pdf",
-        "Página": 2,
-    },
-    {
-        "Nível": "🟡 Médio",
-        "Risco": "Prazo contratual omisso",
-        "Documento": "Contrato_Prestacao_Servicos.pdf",
-        "Página": 3,
-    },
-]
-st.table(pd.DataFrame(riscos_detalhes))
-
-st.markdown("---")
-
-# --- 7 & 10. QUALIDADE DA IA E CONFIGURAÇÕES DO ASSISTENTE ---
-col_ia1, col_ia2 = st.columns(2)
-
-with col_ia1:
-    st.markdown("### 🧪 Qualidade das Respostas da IA")
-    q1, q2 = st.columns(2)
-    with q1:
-        st.metric("Context Relevance", "87%")
-        st.metric("Citation Coverage", "92%")
-    with q2:
-        st.metric("Groundedness", "89%")
-        st.metric("Overall RAG Score", "90%")
-
-with col_ia2:
-    st.markdown("### 🤖 Configurações do Assistente Jurídico")
-    st.text(
-        """
-    • LLM: Gemini 2.5 / 3.7 Flash 🟢 Conectado
-    • Embeddings: Sentence Transformers
-    • Vector DB: FAISS
-    • Reranker: CrossEncoder
-    • Parâmetros: Top-K = 8 | Rerank-K = 5
-    """
-    )
-
-st.markdown("---")
-
-# --- 8 & 9. ATIVIDADE RECENTE E DOCUMENTOS RECENTES ---
-col_act1, col_act2 = st.columns(2)
-
-with col_act1:
-    st.markdown("### 🕐 Atividade Recente")
-    st.markdown(
-        """
-    * 🟢 **21:32** - Documento indexado: `Contrato_Prestacao_Servicos.pdf`
-    * 🔵 **21:28** - Consulta IA: *"Quais cláusulas apresentam risco?"*
-    * 🟠 **21:20** - Análise de risco executada com sucesso
-    * 🟢 **21:12** - Novo processo cadastrado na base
-    """
-    )
-
-with col_act2:
-    st.markdown("### 📄 Documentos Recentes")
-    docs_recentes = pd.DataFrame(
+            "Nível": "🔴 Crítico",
+            "Risco": "Cláusula de rescisão abusiva",
+            "Documento": "Contrato_Prestacao_Servicos.pdf",
+            "Página": 3,
+        },
         {
-            "Documento": [
-                "Contrato_Prestacao_Servicos.pdf",
-                "Peticao_Inicial.txt",
-            ],
-            "Tipo": ["PDF", "TXT"],
-            "Páginas": [3, 1],
-            "Chunks": [31, 10],
-            "Status": ["🟢 Indexado", "🟢 Indexado"],
-        }
+            "Nível": "🟠 Alto",
+            "Risco": "Proteção de dados inadequada",
+            "Documento": "Contrato_Prestacao_Servicos.pdf",
+            "Página": 2,
+        },
+        {
+            "Nível": "🟡 Médio",
+            "Risco": "Prazo contratual omisso",
+            "Documento": "Contrato_Prestacao_Servicos.pdf",
+            "Página": 3,
+        },
+    ]
+    st.table(pd.DataFrame(riscos_detalhes))
+
+    st.markdown("---")
+
+    # --- 7 & 10. QUALIDADE DA IA E CONFIGURAÇÕES DO ASSISTENTE ---
+    col_ia1, col_ia2 = st.columns(2)
+
+    with col_ia1:
+        st.markdown("### 🧪 Qualidade das Respostas da IA")
+        q1, q2 = st.columns(2)
+        with q1:
+            st.metric("Context Relevance", "87%")
+            st.metric("Citation Coverage", "92%")
+        with q2:
+            st.metric("Groundedness", "89%")
+            st.metric("Overall RAG Score", "90%")
+
+    with col_ia2:
+        st.markdown("### 🤖 Configurações do Assistente Jurídico")
+        st.text(
+            """
+        • LLM: Gemini 2.5 / 3.7 Flash 🟢 Conectado
+        • Embeddings: Sentence Transformers
+        • Vector DB: FAISS
+        • Reranker: CrossEncoder
+        • Parâmetros: Top-K = 8 | Rerank-K = 5
+        """
+        )
+
+    st.markdown("---")
+
+    # --- 8 & 9. ATIVIDADE RECENTE E DOCUMENTOS RECENTES ---
+    col_act1, col_act2 = st.columns(2)
+
+    with col_act1:
+        st.markdown("### 🕐 Atividade Recente")
+        st.markdown(
+            """
+        * 🟢 **21:32** - Documento indexado: `Contrato_Prestacao_Servicos.pdf`
+        * 🔵 **21:28** - Consulta IA: *"Quais cláusulas apresentam risco?"*
+        * 🟠 **21:20** - Análise de risco executada com sucesso
+        * 🟢 **21:12** - Novo processo cadastrado na base
+        """
+        )
+
+    with col_act2:
+        st.markdown("### 📄 Documentos Recentes")
+        docs_recentes = pd.DataFrame(
+            {
+                "Documento": [
+                    "Contrato_Prestacao_Servicos.pdf",
+                    "Peticao_Inicial.txt",
+                ],
+                "Tipo": ["PDF", "TXT"],
+                "Páginas": [3, 1],
+                "Chunks": [31, 10],
+                "Status": ["🟢 Indexado", "🟢 Indexado"],
+            }
+        )
+        st.dataframe(docs_recentes, use_container_width=True)
+
+    st.markdown("---")
+
+    # --- 11. SAÚDE DA PLATAFORMA ---
+    st.markdown("### 🛡️ Saúde da Plataforma")
+    s1, s2, s3, s4, s5, s6 = st.columns(6)
+    with s1:
+        st.caption("Database\n🟢 Operacional")
+    with s2:
+        st.caption("Vector DB\n🟢 Operacional")
+    with s3:
+        st.caption("Embeddings\n🟢 Operacional")
+    with s4:
+        st.caption("Reranker\n🟢 Operacional")
+    with s5:
+        st.caption("LLM\n🟢 Operacional")
+    with s6:
+        st.caption("OCR\n🟢 Operacional")
+
+    st.markdown(
+        "<div style='text-align: right; color: gray;'>Última atualização: 01/09/2026 21:35</div>",
+        unsafe_allow_html=True,
     )
-    st.dataframe(docs_recentes, use_container_width=True)
 
-st.markdown("---")
+elif page == "Assistente IA":
+    st.title("🤖 Assistente IA")
+    st.write("Interface do Chat com RAG integrando o Gemini.")
 
-# --- 11. SAÚDE DA PLATAFORMA ---
-st.markdown("### 🛡️ Saúde da Plataforma")
-s1, s2, s3, s4, s5, s6 = st.columns(6)
-with s1:
-    st.caption("Database\n🟢 Operacional")
-with s2:
-    st.caption("Vector DB\n🟢 Operacional")
-with s3:
-    st.caption("Embeddings\n🟢 Operacional")
-with s4:
-    st.caption("Reranker\n🟢 Operacional")
-with s5:
-    st.caption("LLM\n🟢 Operacional")
-with s6:
-    st.caption("OCR\n🟢 Operacional")
-
-st.markdown(
-    "<div style='text-align: right; color: gray;'>Última atualização: 01/09/2026 21:35</div>",
-    unsafe_allow_html=True,
-)
+else:
+    st.title(f"Página: {page}")
+    st.info("Módulo em desenvolvimento.")
 
 elif page == "Assistente IA":
     page_title("Assistente Jurídico IA", "LLM respondendo com RAG, reranking e citações")

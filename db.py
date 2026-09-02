@@ -2,14 +2,17 @@ from pathlib import Path
 from datetime import datetime
 import sqlite3
 
+
 DB_PATH = Path(__file__).parent / "database" / "app.db"
 DB_PATH.parent.mkdir(exist_ok=True)
+
 
 def get_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
 
 def init_db():
     with get_connection() as c:
@@ -20,6 +23,7 @@ def init_db():
             plan TEXT DEFAULT 'Profissional',
             created_at TEXT NOT NULL
         );
+
         CREATE TABLE IF NOT EXISTS users(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             organization_id INTEGER NOT NULL,
@@ -30,6 +34,7 @@ def init_db():
             created_at TEXT NOT NULL,
             FOREIGN KEY(organization_id) REFERENCES organizations(id)
         );
+
         CREATE TABLE IF NOT EXISTS documents(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             organization_id INTEGER NOT NULL,
@@ -42,6 +47,7 @@ def init_db():
             created_at TEXT NOT NULL,
             FOREIGN KEY(organization_id) REFERENCES organizations(id)
         );
+
         CREATE TABLE IF NOT EXISTS chunks(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             document_id INTEGER NOT NULL,
@@ -51,8 +57,10 @@ def init_db():
             chunk_index INTEGER,
             token_estimate INTEGER,
             metadata TEXT,
-            FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE CASCADE
+            FOREIGN KEY(document_id) REFERENCES documents(id)
+                ON DELETE CASCADE
         );
+
         CREATE TABLE IF NOT EXISTS cases(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             organization_id INTEGER NOT NULL,
@@ -63,6 +71,7 @@ def init_db():
             status TEXT DEFAULT 'Em andamento',
             created_at TEXT NOT NULL
         );
+
         CREATE TABLE IF NOT EXISTS audit_logs(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             organization_id INTEGER,
@@ -75,47 +84,192 @@ def init_db():
         );
         """)
 
+
 def seed_demo():
     from security.passwords import hash_password
     from services.embeddings import build_index_for_org
+
     now = datetime.now().isoformat(timespec="seconds")
+
     with get_connection() as c:
-        if c.execute("SELECT COUNT(*) FROM organizations").fetchone()[0]:
+
+        # Não recria os dados se o banco já possuir uma organização.
+        if c.execute(
+            "SELECT COUNT(*) FROM organizations"
+        ).fetchone()[0]:
             return
-        c.execute("INSERT INTO organizations(name,plan,created_at) VALUES(?,?,?)", ("Alpha Advogados","Profissional",now))
-        org = c.execute("SELECT id FROM organizations").fetchone()[0]
-        c.execute(
-            "INSERT INTO users(organization_id,name,email,password_hash,role,created_at) VALUES(?,?,?,?,?,?)",
-            (org,"Dr. João Silva","admin@demo.local",hash_password("admin123"),"Administrador",now)
-        )
-        demos = [
-            ("Contrato_Prestacao_Servicos.pdf","PDF",3,True,[
-                (1,"A cláusula prevê rescisão unilateral e estabelece condições para encerramento do contrato. Recomenda-se verificar aviso prévio e penalidades aplicáveis.",0),
-                (2,"O contrato possui cláusula de confidencialidade e proteção de dados. Devem ser validados escopo, responsabilidades e medidas de segurança.",1),
-                (3,"A vigência contratual deve ser interpretada em conjunto com as regras de renovação e rescisão previstas no instrumento.",2),
-            ]),
-            ("Peticao_Inicial.txt","TXT",1,False,[
-                (1,"A parte autora formula pedido de cobrança com fundamento em obrigação contratual e apresenta documentos como elementos de suporte.",0)
-            ])
-        ]
-        for name, typ, pages, ocr, chunks in demos:
-    cur = c.execute(
-        "INSERT INTO documents(organization_id,name,type,status,pages,chunks,ocr_pages,created_at) VALUES(?,?,?,?,?,?,?,?)",
-        (org, name, typ, "Indexado", pages, len(chunks), 1 if ocr else 0, now)
-    )
 
-    did = cur.lastrowid
-
-    for page, content, idx in chunks:
+        # Organização demo
         c.execute(
-            "INSERT INTO chunks(document_id,organization_id,content,page,chunk_index,token_estimate,metadata) VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO organizations(name, plan, created_at) VALUES(?,?,?)",
             (
-                did,
-                org,
-                content,
-                page,
-                idx,
-                max(1, len(content) // 4),
-                "{}"
+                "Alpha Advogados",
+                "Profissional",
+                now
             )
         )
+
+        org = c.execute(
+            "SELECT id FROM organizations"
+        ).fetchone()[0]
+
+        # Usuário administrador demo
+        c.execute(
+            """
+            INSERT INTO users(
+                organization_id,
+                name,
+                email,
+                password_hash,
+                role,
+                created_at
+            )
+            VALUES(?,?,?,?,?,?)
+            """,
+            (
+                org,
+                "Dr. João Silva",
+                "admin@demo.local",
+                hash_password("admin123"),
+                "Administrador",
+                now
+            )
+        )
+
+        # Documentos e chunks demonstrativos
+        demos = [
+            (
+                "Contrato_Prestacao_Servicos.pdf",
+                "PDF",
+                3,
+                True,
+                [
+                    (
+                        1,
+                        "A cláusula prevê rescisão unilateral e estabelece "
+                        "condições para encerramento do contrato. Recomenda-se "
+                        "verificar aviso prévio e penalidades aplicáveis.",
+                        0
+                    ),
+                    (
+                        2,
+                        "O contrato possui cláusula de confidencialidade e "
+                        "proteção de dados. Devem ser validados escopo, "
+                        "responsabilidades e medidas de segurança.",
+                        1
+                    ),
+                    (
+                        3,
+                        "A vigência contratual deve ser interpretada em "
+                        "conjunto com as regras de renovação e rescisão "
+                        "previstas no instrumento.",
+                        2
+                    ),
+                ]
+            ),
+            (
+                "Peticao_Inicial.txt",
+                "TXT",
+                1,
+                False,
+                [
+                    (
+                        1,
+                        "A parte autora formula pedido de cobrança com "
+                        "fundamento em obrigação contratual e apresenta "
+                        "documentos como elementos de suporte.",
+                        0
+                    )
+                ]
+            )
+        ]
+
+        # Inserção dos documentos
+        for name, typ, pages, ocr, chunks in demos:
+
+            cur = c.execute(
+                """
+                INSERT INTO documents(
+                    organization_id,
+                    name,
+                    type,
+                    status,
+                    pages,
+                    chunks,
+                    ocr_pages,
+                    created_at
+                )
+                VALUES(?,?,?,?,?,?,?,?)
+                """,
+                (
+                    org,
+                    name,
+                    typ,
+                    "Indexado",
+                    pages,
+                    len(chunks),
+                    1 if ocr else 0,
+                    now
+                )
+            )
+
+            # ID do documento recém-criado
+            did = cur.lastrowid
+
+            # Inserção dos chunks
+            for page, content, idx in chunks:
+
+                c.execute(
+                    """
+                    INSERT INTO chunks(
+                        document_id,
+                        organization_id,
+                        content,
+                        page,
+                        chunk_index,
+                        token_estimate,
+                        metadata
+                    )
+                    VALUES(?,?,?,?,?,?,?)
+                    """,
+                    (
+                        did,
+                        org,
+                        content,
+                        page,
+                        idx,
+                        max(1, len(content) // 4),
+                        "{}"
+                    )
+                )
+
+        # Processo demonstrativo
+        c.execute(
+            """
+            INSERT INTO cases(
+                organization_id,
+                title,
+                client,
+                category,
+                priority,
+                created_at
+            )
+            VALUES(?,?,?,?,?,?)
+            """,
+            (
+                org,
+                "Ação de Cobrança",
+                "Cliente Exemplo",
+                "Cível",
+                "Alta",
+                now
+            )
+        )
+
+    # Cria o índice vetorial da organização.
+    # Se o modelo de embeddings ainda não puder ser carregado,
+    # o aplicativo não será impedido de iniciar.
+    try:
+        build_index_for_org(org)
+    except Exception:
+        pass

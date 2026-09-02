@@ -316,15 +316,10 @@ if page == "Dashboard":
     )
 
 elif page == "Assistente IA":
-    st.title("🤖 Assistente IA")
-    st.write("Interface do Chat com RAG integrando o Gemini.")
-
-else:
-    st.title(f"Página: {page}")
-    st.info("Módulo em desenvolvimento.")
-
-elif page == "Assistente IA":
-    page_title("Assistente Jurídico IA", "LLM respondendo com RAG, reranking e citações")
+    page_title(
+        "Assistente Jurídico IA",
+        "LLM respondendo com RAG, reranking e citações",
+    )
     if "messages" not in st.session_state:
         st.session_state.messages = []
     for msg in st.session_state.messages:
@@ -332,7 +327,7 @@ elif page == "Assistente IA":
             st.markdown(msg["content"])
     q = st.chat_input("Ex.: Quais cláusulas do contrato apresentam risco?")
     if q:
-        st.session_state.messages.append({"role":"user","content":q})
+        st.session_state.messages.append({"role": "user", "content": q})
         with st.spinner("Executando Retriever → Reranker → LLM..."):
             result = rag_answer(q, user["organization_id"], top_k=8, rerank_k=5)
         response = result["answer"]
@@ -340,13 +335,27 @@ elif page == "Assistente IA":
             response += "\n\n### 📚 Citações\n"
             for cit in result["citations"]:
                 response += f"- **[{cit['id']}] {cit['document']}**, página {cit.get('page','N/D')} — `{cit['chunk_id']}`\n"
-        st.session_state.messages.append({"role":"assistant","content":response})
-        audit(user, "rag.ask", "conversation", None, {"query": q, "retrieved": len(result["retrieved"]), "reranked": len(result["reranked"])})
+        st.session_state.messages.append(
+            {"role": "assistant", "content": response}
+        )
+        audit(
+            user,
+            "rag.ask",
+            "conversation",
+            None,
+            {
+                "query": q,
+                "retrieved": len(result["retrieved"]),
+                "reranked": len(result["reranked"]),
+            },
+        )
         st.rerun()
 
 elif page == "Ingestão RAG":
-    page_title("Ingestão RAG", "PDF/DOCX → OCR → chunking → embeddings → FAISS")
-    up = st.file_uploader("Envie um documento", type=["pdf","docx","txt"])
+    page_title(
+        "Ingestão RAG", "PDF/DOCX → OCR → chunking → embeddings → FAISS"
+    )
+    up = st.file_uploader("Envie um documento", type=["pdf", "docx", "txt"])
     use_ocr = st.checkbox("Usar OCR quando necessário", True)
     if up and st.button("🚀 Processar documento", type="primary"):
         with st.status("Executando pipeline...", expanded=True) as status:
@@ -356,37 +365,68 @@ elif page == "Ingestão RAG":
             st.write("4/5 Gerando embeddings")
             st.write("5/5 Atualizando índice vetorial")
             try:
-                result = ingest_document(up, user["organization_id"], use_ocr=use_ocr)
+                result = ingest_document(
+                    up, user["organization_id"], use_ocr=use_ocr
+                )
                 status.update(label="Pipeline concluído", state="complete")
-                st.success(f"Documento indexado: {result['chunks']} chunks · {result['pages']} páginas · OCR: {result['ocr_pages']} páginas")
-                audit(user, "document.ingest", "document", result["document_id"], result)
+                st.success(
+                    f"Documento indexado: {result['chunks']} chunks · {result['pages']} páginas · OCR: {result['ocr_pages']} páginas"
+                )
+                audit(
+                    user,
+                    "document.ingest",
+                    "document",
+                    result["document_id"],
+                    result,
+                )
             except Exception as e:
                 status.update(label="Falha no pipeline", state="error")
                 st.error(str(e))
-    st.info("OCR de PDF escaneado usa PyMuPDF + Tesseract. Em produção, instale o binário Tesseract no servidor.")
+    st.info(
+        "OCR de PDF escaneado usa PyMuPDF + Tesseract. Em produção, instale o binário Tesseract no servidor."
+    )
 
 elif page == "Base Vetorial":
     page_title("Base Vetorial", "Busca semântica + reranking")
     q = st.text_input("Consulta")
     if q:
         with st.spinner("Retriever + Reranker..."):
-            result = retrieve_and_rerank(q, user["organization_id"], top_k=10, rerank_k=5)
-        st.write(f"**Retriever:** {len(result['retrieved'])} resultados · **Reranker:** {len(result['reranked'])} resultados")
+            result = retrieve_and_rerank(
+                q, user["organization_id"], top_k=10, rerank_k=5
+            )
+        st.write(
+            f"**Retriever:** {len(result['retrieved'])} resultados · **Reranker:** {len(result['reranked'])} resultados"
+        )
         for i, x in enumerate(result["reranked"], 1):
             with st.container(border=True):
-                st.write(f"**[{i}] {x['document']} · página {x.get('page','N/D')}**")
-                st.caption(f"chunk={x['chunk_id']} · score retriever={x['retriever_score']:.4f} · score reranker={x['reranker_score']:.4f}")
+                st.write(
+                    f"**[{i}] {x['document']} · página {x.get('page','N/D')}**"
+                )
+                st.caption(
+                    f"chunk={x['chunk_id']} · score retriever={x['retriever_score']:.4f} · score reranker={x['reranker_score']:.4f}"
+                )
                 st.write(x["content"])
 
 elif page == "Avaliação RAG":
-    page_title("Avaliação da Resposta", "Métricas simples e rastreáveis para qualidade do RAG")
+    page_title(
+        "Avaliação da Resposta",
+        "Métricas simples e rastreáveis para qualidade do RAG",
+    )
     question = st.text_area("Pergunta")
     answer = st.text_area("Resposta da IA")
     if st.button("Avaliar", type="primary") and question and answer:
         with st.spinner("Calculando métricas..."):
-            result = rag_answer(question, user["organization_id"], top_k=8, rerank_k=5, generate_answer=False)
-            score = evaluate_answer(question, answer, result["reranked"], result["citations"])
-        a,b,c,d = st.columns(4)
+            result = rag_answer(
+                question,
+                user["organization_id"],
+                top_k=8,
+                rerank_k=5,
+                generate_answer=False,
+            )
+            score = evaluate_answer(
+                question, answer, result["reranked"], result["citations"]
+            )
+        a, b, c, d = st.columns(4)
         a.metric("Context relevance", f"{score['context_relevance']:.2f}")
         b.metric("Citation coverage", f"{score['citation_coverage']:.2f}")
         c.metric("Groundedness", f"{score['groundedness']:.2f}")
@@ -398,15 +438,27 @@ elif page == "Documentos":
     for d in list_documents(user["organization_id"]):
         with st.container(border=True):
             st.write(f"**{d['name']}**")
-            st.caption(f"{d['type']} · {d['status']} · páginas: {d['pages']} · chunks: {d['chunks']} · OCR: {d['ocr_pages']}")
+            st.caption(
+                f"{d['type']} · {d['status']} · páginas: {d['pages']} · chunks: {d['chunks']} · OCR: {d['ocr_pages']}"
+            )
 
 elif page == "Processos":
     page_title("Processos")
     with st.form("new_case"):
         title = st.text_input("Título")
         client = st.text_input("Cliente")
-        category = st.selectbox("Categoria", ["Cível","Trabalhista","Contratos","Tributário","Previdenciário","Outros"])
-        priority = st.selectbox("Prioridade", ["Baixa","Média","Alta"])
+        category = st.selectbox(
+            "Categoria",
+            [
+                "Cível",
+                "Trabalhista",
+                "Contratos",
+                "Tributário",
+                "Previdenciário",
+                "Outros",
+            ],
+        )
+        priority = st.selectbox("Prioridade", ["Baixa", "Média", "Alta"])
         if st.form_submit_button("Cadastrar", type="primary"):
             create_case(user["organization_id"], title, client, category, priority)
             st.success("Processo criado.")
@@ -414,7 +466,9 @@ elif page == "Processos":
     for c in list_cases(user["organization_id"]):
         with st.container(border=True):
             st.write(f"**{c['title']}**")
-            st.caption(f"{c['client']} · {c['category']} · {c['priority']} · {c['status']}")
+            st.caption(
+                f"{c['client']} · {c['category']} · {c['priority']} · {c['status']}"
+            )
 
 elif page == "Análise de Risco":
     page_title("Análise de Risco IA")
@@ -422,26 +476,39 @@ elif page == "Análise de Risco":
     if st.button("Analisar risco", type="primary") and text:
         result = rag_answer(
             "Analise os principais riscos, evidências, lacunas e recomendações sem inventar fatos.",
-            user["organization_id"], top_k=8, rerank_k=5, extra_context=text
+            user["organization_id"],
+            top_k=8,
+            rerank_k=5,
+            extra_context=text,
         )
         st.markdown(result["answer"])
         if result["citations"]:
             st.markdown("### 📚 Evidências")
             for c in result["citations"]:
-                st.write(f"- [{c['id']}] {c['document']} · página {c.get('page','N/D')}")
+                st.write(
+                    f"- [{c['id']}] {c['document']} · página {c.get('page','N/D')}"
+                )
 
 elif page == "Auditoria":
     page_title("Auditoria", "Eventos do tenant")
     from db import get_connection
+
     with get_connection() as c:
-        rows = c.execute("SELECT action,entity_type,entity_id,created_at,metadata FROM audit_logs WHERE organization_id=? ORDER BY id DESC LIMIT 100", (user["organization_id"],)).fetchall()
+        rows = c.execute(
+            "SELECT action,entity_type,entity_id,created_at,metadata FROM audit_logs WHERE organization_id=? ORDER BY id DESC LIMIT 100",
+            (user["organization_id"],),
+        ).fetchall()
     for r in rows:
-        st.write(f"`{r['created_at']}` · **{r['action']}** · {r['entity_type']}#{r['entity_id']} · {r['metadata']}")
+        st.write(
+            f"`{r['created_at']}` · **{r['action']}** · {r['entity_type']}#{r['entity_id']} · {r['metadata']}"
+        )
 
 elif page == "Configurações":
     page_title("Configurações IA/RAG")
     st.selectbox("LLM", ["Modo Demo", "Gemini", "OpenAI"])
-    st.selectbox("Vector DB", ["FAISS local", "Qdrant (produção)", "pgvector (produção)"])
+    st.selectbox(
+        "Vector DB", ["FAISS local", "Qdrant (produção)", "pgvector (produção)"]
+    )
     st.selectbox("Reranker", ["CrossEncoder", "Fallback lexical"])
     st.number_input("Top K Retriever", 1, 50, 8)
     st.number_input("Top K Reranker", 1, 20, 5)

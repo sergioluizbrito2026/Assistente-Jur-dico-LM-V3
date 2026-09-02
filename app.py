@@ -2,7 +2,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from audit import audit
+from services.audit import audit
 from cases import create_case, list_cases
 from db import init_db, seed_demo
 from documents import list_documents
@@ -11,7 +11,6 @@ from services.documents import list_documents
 from services.evaluation import evaluate_answer
 from services.ingestion import ingest_document
 from services.rag_pipeline import rag_answer, retrieve_and_rerank
-from services.audit import audit
 
 # 1. Configuração única da página (deve ser a primeira chamada Streamlit)
 st.set_page_config(

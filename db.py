@@ -98,22 +98,24 @@ def seed_demo():
                 (1,"A parte autora formula pedido de cobrança com fundamento em obrigação contratual e apresenta documentos como elementos de suporte.",0)
             ])
         ]
-        for name,typ,pages,ocr,chunks in demos:
-            c.execute(
-                "INSERT INTO documents(organization_id,name,type,status,pages,chunks,ocr_pages,created_at) VALUES(?,?,?,?,?,?,?,?)",
-                (org,name,typ,"Indexado",pages,len(chunks),1 if ocr else 0,now)
-            )
-            did=c.lastrowid
-            for page,content,idx in chunks:
-                c.execute(
-                    "INSERT INTO chunks(document_id,organization_id,content,page,chunk_index,token_estimate,metadata) VALUES(?,?,?,?,?,?,?)",
-                    (did,org,content,page,idx,max(1,len(content)//4),"{}")
-                )
+        for name, typ, pages, ocr, chunks in demos:
+    cur = c.execute(
+        "INSERT INTO documents(organization_id,name,type,status,pages,chunks,ocr_pages,created_at) VALUES(?,?,?,?,?,?,?,?)",
+        (org, name, typ, "Indexado", pages, len(chunks), 1 if ocr else 0, now)
+    )
+
+    did = cur.lastrowid
+
+    for page, content, idx in chunks:
         c.execute(
-            "INSERT INTO cases(organization_id,title,client,category,priority,created_at) VALUES(?,?,?,?,?,?)",
-            (org,"Ação de Cobrança","Cliente Exemplo","Cível","Alta",now)
+            "INSERT INTO chunks(document_id,organization_id,content,page,chunk_index,token_estimate,metadata) VALUES(?,?,?,?,?,?,?)",
+            (
+                did,
+                org,
+                content,
+                page,
+                idx,
+                max(1, len(content) // 4),
+                "{}"
+            )
         )
-    try:
-        build_index_for_org(org)
-    except Exception:
-        pass

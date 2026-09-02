@@ -363,6 +363,7 @@ def rag_answer(
     rerank_k=DEFAULT_RERANK_K,
     extra_context="",
     generate_answer_flag=True,
+    agent_instruction=None,
 ):
     """
     Pipeline RAG completo:
@@ -493,12 +494,13 @@ def rag_answer(
         and callable(generate_answer)
     ):
 
-        try:
+       try:
 
-            answer = generate_answer(
-                query,
-                context,
-            )
+    answer = generate_answer(
+        query,
+        context,
+        agent_instruction=agent_instruction,
+    )
 
         except Exception as exc:
 

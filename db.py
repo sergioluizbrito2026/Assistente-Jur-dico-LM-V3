@@ -86,190 +86,159 @@ def init_db():
 
 
 def seed_demo():
-    from security.passwords import hash_password
-    from services.embeddings import build_index_for_org
+  from security.passwords import hash_password
+  from services.embeddings import build_index_for_org
 
-    now = datetime.now().isoformat(timespec="seconds")
+  now = datetime.now().isoformat(timespec="seconds")
 
-    with get_connection() as c:
+  with get_connection() as c:
+    # Garante a existência da organização padrão
+    c.execute(
+        """
+            INSERT OR IGNORE INTO organizations(id, name, plan, created_at)
+            VALUES(1, ?, ?, ?)
+        """,
+        ("Alpha Advogados", "Profissional", now),
+    )
 
-        # Não recria os dados se o banco já possuir uma organização.
-        if c.execute(
-            "SELECT COUNT(*) FROM organizations"
-        ).fetchone()[0]:
-            return
+    org_row = c.execute(
+        "SELECT id FROM organizations LIMIT 1"
+    ).fetchone()
+    if not org_row:
+      return
+    org = org_row[0]
 
-        # Organização demo
-        c.execute(
-            "INSERT INTO organizations(name, plan, created_at) VALUES(?,?,?)",
-            (
-                "Alpha Advogados",
-                "Profissional",
-                now
-            )
-        )
-
-        org = c.execute(
-            "SELECT id FROM organizations"
-        ).fetchone()[0]
-
-        # Usuário administrador demo
-        c.execute(
-            """
-            INSERT INTO users(
-                organization_id,
-                name,
-                email,
-                password_hash,
-                role,
-                created_at
+    # Insere o usuário administrador demo com segurança contra duplicidade de email
+    c.execute(
+        """
+            INSERT OR IGNORE INTO users(
+                organization_id, name, email, password_hash, role, created_at
             )
             VALUES(?,?,?,?,?,?)
-            """,
-            (
-                org,
-                "Dr. João Silva",
-                "admin@demo.local",
-                hash_password("admin123"),
-                "Administrador",
-                now
-            )
-        )
+        """,
+        (
+            org,
+            "Dr. João Silva",
+            "admin@demo.local",
+            hash_password("admin123"),
+            "Administrador",
+            now,
+        ),
+    )
 
-        # Documentos e chunks demonstrativos
-        demos = [
-            (
-                "Contrato_Prestacao_Servicos.pdf",
-                "PDF",
-                3,
-                True,
-                [
-                    (
-                        1,
-                        "A cláusula prevê rescisão unilateral e estabelece "
-                        "condições para encerramento do contrato. Recomenda-se "
-                        "verificar aviso prévio e penalidades aplicáveis.",
-                        0
-                    ),
-                    (
-                        2,
-                        "O contrato possui cláusula de confidencialidade e "
-                        "proteção de dados. Devem ser validados escopo, "
-                        "responsabilidades e medidas de segurança.",
-                        1
-                    ),
-                    (
-                        3,
-                        "A vigência contratual deve ser interpretada em "
-                        "conjunto com as regras de renovação e rescisão "
-                        "previstas no instrumento.",
-                        2
-                    ),
-                ]
-            ),
-            (
-                "Peticao_Inicial.txt",
-                "TXT",
-                1,
-                False,
-                [
-                    (
-                        1,
-                        "A parte autora formula pedido de cobrança com "
-                        "fundamento em obrigação contratual e apresenta "
-                        "documentos como elementos de suporte.",
-                        0
-                    )
-                ]
-            )
-        ]
+    # Documentos e chunks demonstrativos
+    demos = [
+        (
+            "Contrato_Prestacao_Servicos.pdf",
+            "PDF",
+            3,
+            True,
+            [
+                (
+                    1,
+                    "A cláusula prevê rescisão unilateral e estabelece "
+                    "condições para encerramento do contrato. Recomenda-se "
+                    "verificar aviso prévio e penalidades aplicáveis.",
+                    0,
+                ),
+                (
+                    2,
+                    "O contrato possui cláusula de confidencialidade e "
+                    "proteção de dados. Devem ser validados escopo, "
+                    "responsabilidades e medidas de segurança.",
+                    1,
+                ),
+                (
+                    3,
+                    "A vigência contratual deve ser interpretada em "
+                    "conjunto com as regras de renovação e rescisão "
+                    "previstas no instrumento.",
+                    2,
+                ),
+            ],
+        ),
+        (
+            "Peticao_Inicial.txt",
+            "TXT",
+            1,
+            False,
+            [
+                (
+                    1,
+                    "A parte autora formula pedido de cobrança com "
+                    "fundamento em obrigação contratual e apresenta "
+                    "documentos como elementos de suporte.",
+                    0,
+                )
+            ],
+        ),
+    ]
 
-        # Inserção dos documentos
-        for name, typ, pages, ocr, chunks in demos:
+    for name, typ, pages, ocr, chunks in demos:
+      # Verifica se o documento já existe para evitar duplicar
+      existing_doc = c.execute(
+          "SELECT id FROM documents WHERE organization_id = ? AND name = ?",
+          (org, name),
+      ).fetchone()
 
-            cur = c.execute(
-                """
+      if existing_doc:
+        did = existing_doc[0]
+      else:
+        cur = c.execute(
+            """
                 INSERT INTO documents(
-                    organization_id,
-                    name,
-                    type,
-                    status,
-                    pages,
-                    chunks,
-                    ocr_pages,
-                    created_at
+                    organization_id, name, type, status, pages, chunks, ocr_pages, created_at
                 )
                 VALUES(?,?,?,?,?,?,?,?)
-                """,
-                (
-                    org,
-                    name,
-                    typ,
-                    "Indexado",
-                    pages,
-                    len(chunks),
-                    1 if ocr else 0,
-                    now
-                )
-            )
-
-            # ID do documento recém-criado
-            did = cur.lastrowid
-
-            # Inserção dos chunks
-            for page, content, idx in chunks:
-
-                c.execute(
-                    """
-                    INSERT INTO chunks(
-                        document_id,
-                        organization_id,
-                        content,
-                        page,
-                        chunk_index,
-                        token_estimate,
-                        metadata
-                    )
-                    VALUES(?,?,?,?,?,?,?)
-                    """,
-                    (
-                        did,
-                        org,
-                        content,
-                        page,
-                        idx,
-                        max(1, len(content) // 4),
-                        "{}"
-                    )
-                )
-
-        # Processo demonstrativo
-        c.execute(
-            """
-            INSERT INTO cases(
-                organization_id,
-                title,
-                client,
-                category,
-                priority,
-                created_at
-            )
-            VALUES(?,?,?,?,?,?)
             """,
             (
                 org,
-                "Ação de Cobrança",
-                "Cliente Exemplo",
-                "Cível",
-                "Alta",
-                now
-            )
+                name,
+                typ,
+                "Indexado",
+                pages,
+                len(chunks),
+                1 if ocr else 0,
+                now,
+            ),
         )
+        did = cur.lastrowid
 
-    # Cria o índice vetorial da organização.
-    # Se o modelo de embeddings ainda não puder ser carregado,
-    # o aplicativo não será impedido de iniciar.
-    try:
-        build_index_for_org(org)
-    except Exception:
-        pass
+        for page, content, idx in chunks:
+          c.execute(
+              """
+                    INSERT INTO chunks(
+                        document_id, organization_id, content, page, chunk_index, token_estimate, metadata
+                    )
+                    VALUES(?,?,?,?,?,?,?)
+                """,
+              (
+                  did,
+                  org,
+                  content,
+                  page,
+                  idx,
+                  max(1, len(content) // 4),
+                  "{}",
+              ),
+          )
+
+    # Processo demonstrativo (insere apenas se não houver nenhum cadastrado)
+    case_count = c.execute(
+        "SELECT COUNT(*) FROM cases WHERE organization_id = ?", (org,)
+    ).fetchone()[0]
+    if case_count == 0:
+      c.execute(
+          """
+                INSERT INTO cases(
+                    organization_id, title, client, category, priority, created_at
+                )
+                VALUES(?,?,?,?,?,?)
+            """,
+          (org, "Ação de Cobrança", "Cliente Exemplo", "Cível", "Alta", now),
+      )
+
+  try:
+    build_index_for_org(org)
+  except Exception:
+    pass

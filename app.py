@@ -11,6 +11,7 @@ from services.auth import authenticate, get_current_user, logout
 from services.evaluation import evaluate_answer
 from services.ingestion import ingest_document
 from services.rag_pipeline import rag_answer, retrieve_and_rerank
+from services.ai_orchestrator import orchestrate, risk_analysis
 
 # 1. Configuração única da página (deve ser a primeira chamada Streamlit)
 st.set_page_config(
@@ -321,7 +322,13 @@ elif page == "Assistente IA":
     if q:
         st.session_state.messages.append({"role": "user", "content": q})
         with st.spinner("Executando Retriever → Reranker → LLM..."):
-            result = rag_answer(q, user["organization_id"], top_k=8, rerank_k=5)
+            result = orchestrate(
+                query=q,
+                org_id=user["organization_id"],
+                mode="auto",
+                top_k=8,
+                rerank_k=5,
+            )
         response = result["answer"]
         if result["citations"]:
             response += "\n\n### 📚 Citações\n"
@@ -337,8 +344,15 @@ elif page == "Assistente IA":
             None,
             {
                 "query": q,
-                "retrieved": len(result["retrieved"]),
-                "reranked": len(result["reranked"]),
+                "agent": result.get("agent"),
+                "intent": result.get("intent"),
+                "retrieved": len(result.get("retrieved", [])),
+                "reranked": len(result.get("reranked", [])),
+                "evidence_count": result.get("evidence_count", 0),
+                "latency_ms": result.get("latency_ms", 0),
+                "guard_allowed": result.get("guard", {}).get("allowed", True)
+                if isinstance(result.get("guard"), dict)
+                else True,
             },
         )
         st.rerun()
@@ -413,7 +427,7 @@ elif page == "Avaliação RAG":
                 user["organization_id"],
                 top_k=8,
                 rerank_k=5,
-                generate_answer=False,
+                generate_answer_flag=False,
             )
             score = evaluate_answer(
                 question, answer, result["reranked"], result["citations"]
@@ -466,9 +480,9 @@ elif page == "Análise de Risco":
     page_title("Análise de Risco IA")
     text = st.text_area("Cole o texto ou resumo do documento", height=260)
     if st.button("Analisar risco", type="primary") and text:
-        result = rag_answer(
-            "Analise os principais riscos, evidências, lacunas e recomendações sem inventar fatos.",
-            user["organization_id"],
+        result = risk_analysis(
+            query="Analise os principais riscos, evidências, lacunas e recomendações sem inventar fatos.",
+            org_id=user["organization_id"],
             top_k=8,
             rerank_k=5,
             extra_context=text,

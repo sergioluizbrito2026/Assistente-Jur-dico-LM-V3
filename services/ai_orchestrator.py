@@ -1,3 +1,8 @@
+from services.agents import legal_agent
+from services.agents import risk_agent
+from services.agents import summary_agent
+from services.agents import guard_agent
+
 """
 AI Orchestrator - Assistente Jurídico IA SaaS V3
 
@@ -412,9 +417,38 @@ def orchestrate(
     # --------------------------------------------------------
     # EXECUTAR RAG
     # --------------------------------------------------------
+try:
+    # EXECUÇÃO DO AGENTE ESPECIALIZADO
 
-    try:
+    if agent == AGENT_LEGAL:
+        result = legal_agent.run(
+            query=query,
+            org_id=org_id,
+            top_k=top_k,
+            rerank_k=rerank_k,
+            extra_context=extra_context,
+        )
 
+    elif agent == AGENT_RISK:
+        result = risk_agent.run(
+            query=query,
+            org_id=org_id,
+            top_k=top_k,
+            rerank_k=rerank_k,
+            extra_context=extra_context,
+        )
+
+    elif agent == AGENT_SUMMARY:
+        result = summary_agent.run(
+            query=query,
+            org_id=org_id,
+            top_k=top_k,
+            rerank_k=rerank_k,
+            extra_context=extra_context,
+        )
+
+    else:
+        # Perguntas gerais continuam usando o RAG padrão
         result = rag_answer(
             query=query,
             org_id=org_id,
@@ -424,71 +458,29 @@ def orchestrate(
             agent_instruction=instruction,
         )
 
-    except TypeError:
+except Exception as exc:
+    logger.exception("Erro no AI Orchestrator.")
 
-        # Compatibilidade com versões do rag_pipeline
-        # que ainda não possuem agent_instruction.
+    latency_ms = int(
+        (time.perf_counter() - started_at) * 1000
+    )
 
-        logger.warning(
-            "rag_answer sem suporte a agent_instruction; "
-            "executando modo compatível."
-        )
-
-        try:
-            result = rag_answer(
-                query=query,
-                org_id=org_id,
-                top_k=top_k,
-                rerank_k=rerank_k,
-                extra_context=extra_context,
-            )
-
-        except Exception as exc:
-
-            logger.exception("Erro no pipeline RAG.")
-
-            latency_ms = int(
-                (time.perf_counter() - started_at) * 1000
-            )
-
-            return {
-                "success": False,
-                "answer": "Não foi possível executar a análise.",
-                "agent": agent,
-                "agent_label": agent_label(agent),
-                "intent": agent,
-                "citations": [],
-                "context": [],
-                "evidence_count": 0,
-                "evidence_status": "error",
-                "latency_ms": latency_ms,
-                "error": str(exc),
-            }
-
-    except Exception as exc:
-
-        logger.exception("Erro no AI Orchestrator.")
-
-        latency_ms = int(
-            (time.perf_counter() - started_at) * 1000
-        )
-
-        return {
-            "success": False,
-            "answer": (
-                "Ocorreu um erro durante a análise. "
-                "Tente novamente."
-            ),
-            "agent": agent,
-            "agent_label": agent_label(agent),
-            "intent": agent,
-            "citations": [],
-            "context": [],
-            "evidence_count": 0,
-            "evidence_status": "error",
-            "latency_ms": latency_ms,
-            "error": str(exc),
-        }
+    return {
+        "success": False,
+        "answer": (
+            "Ocorreu um erro durante a análise. "
+            "Tente novamente."
+        ),
+        "agent": agent,
+        "agent_label": agent_label(agent),
+        "intent": agent,
+        "citations": [],
+        "context": [],
+        "evidence_count": 0,
+        "evidence_status": "error",
+        "latency_ms": latency_ms,
+        "error": str(exc),
+    }
 
     # --------------------------------------------------------
     # NORMALIZAR RESULTADO

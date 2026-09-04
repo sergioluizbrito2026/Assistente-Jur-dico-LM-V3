@@ -988,37 +988,212 @@ elif page == "Assistente IA":
         with st.chat_message("assistant"):
 
             with st.spinner(
-                "🧠 Agente Jurídico → Guard → RAG → Retriever → Reranker → LLM..."
-            ):
+    "🧠 Agente Jurídico → Guard → RAG → Retriever → Reranker → LLM..."
+):
+    try:
+        result = call_orchestrator(
+            query=q,
+            org_id=user.get("organization_id"),
+            mode="auto",
+            top_k=8,
+            rerank_k=5,
+        )
 
-                result = call_orchestrator(
-                    query=q,
-                    org_id=user.get(
-                        "organization_id"
-                    ),
-                    mode="auto",
-                    top_k=8,
-                    rerank_k=5,
-                )
-
-            response = str(
-                result.get(
-                    "answer",
-                    "",
-                )
-                or ""
-            ).strip()
-
-            if not response:
-
-                response = (
-                    "Não foi possível gerar "
-                    "uma resposta."
-                )
-
-            st.markdown(
-                response
+        # --------------------------------------------------
+        # VALIDAÇÃO DO RETORNO
+        # --------------------------------------------------
+        if result is None:
+            raise RuntimeError(
+                "O orquestrador não retornou nenhum resultado."
             )
+
+        if not isinstance(result, dict):
+            raise TypeError(
+                "O orquestrador retornou um tipo inválido: "
+                f"{type(result).__name__}"
+            )
+
+    except Exception as e:
+        # --------------------------------------------------
+        # ERRO REAL PARA DIAGNÓSTICO
+        # --------------------------------------------------
+        st.error(
+            "❌ Não foi possível gerar uma resposta."
+        )
+
+        st.markdown(
+            "### 🔍 Diagnóstico da execução"
+        )
+
+        st.write(
+            f"**Erro:** `{type(e).__name__}`"
+        )
+
+        st.write(
+            f"**Detalhes:** `{str(e)}`"
+        )
+
+        st.markdown(
+            "### ⚠️ Detalhes técnicos"
+        )
+
+        st.exception(e)
+
+        st.stop()
+
+
+# ==========================================================
+# RESPOSTA
+# ==========================================================
+
+response = str(
+    result.get(
+        "answer",
+        "",
+    )
+    or ""
+).strip()
+
+
+# ==========================================================
+# FALLBACK
+# ==========================================================
+
+if not response:
+
+    response = (
+        "Não foi possível gerar uma resposta "
+        "com base nas evidências disponíveis."
+    )
+
+
+# ==========================================================
+# EXIBIR RESPOSTA
+# ==========================================================
+
+st.markdown(response)
+
+
+# ==========================================================
+# DIAGNÓSTICO DO RAG
+# ==========================================================
+
+with st.expander(
+    "🔍 Diagnóstico da execução",
+    expanded=False,
+):
+
+    st.write(
+        f"**Agente:** "
+        f"{result.get('agent', 'N/D')}"
+    )
+
+    st.write(
+        f"**Intent:** "
+        f"{result.get('intent', 'N/D')}"
+    )
+
+    st.write(
+        f"**Documentos recuperados:** "
+        f"{len(result.get('retrieved', []) or [])}"
+    )
+
+    st.write(
+        f"**Chunks reranked:** "
+        f"{len(result.get('reranked', []) or [])}"
+    )
+
+    st.write(
+        f"**Evidências:** "
+        f"{result.get('evidence_count', 0)}"
+    )
+
+    st.write(
+        f"**Latência:** "
+        f"{result.get('latency_ms', 'N/D')} ms"
+    )
+
+    guard = result.get("guard", {})
+
+    if isinstance(guard, dict):
+        allowed = guard.get(
+            "allowed",
+            True,
+        )
+
+        st.write(
+            "**Guard Agent:** "
+            + (
+                "🟢 Permitido"
+                if allowed
+                else "🔴 Bloqueado"
+            )
+        )
+
+    # Mostra informações adicionais somente
+    # quando existirem.
+    if result.get("error"):
+        st.error(
+            f"Erro do orquestrador: "
+            f"{result.get('error')}"
+        )
+
+    if result.get("reason"):
+        st.info(
+            f"Motivo: "
+            f"{result.get('reason')}"
+        )
+
+
+# ==========================================================
+# CITAÇÕES
+# ==========================================================
+
+citations = result.get(
+    "citations",
+    [],
+) or []
+
+if citations:
+
+    st.markdown(
+        "### 📚 Citações"
+    )
+
+    for cit in citations:
+
+        if not isinstance(cit, dict):
+            continue
+
+        citation_id = cit.get(
+            "id",
+            "?",
+        )
+
+        document = cit.get(
+            "document",
+            cit.get(
+                "document_name",
+                "Documento",
+            ),
+        )
+
+        page = cit.get(
+            "page",
+            "N/D",
+        )
+
+        chunk_id = cit.get(
+            "chunk_id",
+            "N/D",
+        )
+
+        st.markdown(
+            f"- **[{citation_id}] "
+            f"{document}**, "
+            f"página {page} — "
+            f"`{chunk_id}`"
+        )
 
             # ------------------------------------------------
             # CITAÇÕES

@@ -1,6 +1,48 @@
-from pathlib import Path
+"""
+Assistente Jurídico SaaS IA V3
+services/embeddings.py
+
+Serviço de embeddings e busca vetorial.
+
+Responsabilidades:
+
+    Documento/Chunks
+          ↓
+    SentenceTransformer
+          ↓
+    Vetores normalizados
+          ↓
+    FAISS
+          ↓
+    Busca semântica
+          ↓
+    Retriever
+          ↓
+    Reranker / RAG
+
+Características:
+
+- Isolamento por organização.
+- Índice FAISS por organização.
+- Metadados persistidos em JSON.
+- Cache do modelo.
+- Cache dos índices.
+- Escrita atômica.
+- Indexação completa.
+- Indexação incremental.
+- Rebuild automático quando necessário.
+- Validação dimensional.
+- Proteção contra índices corrompidos.
+- Compatível com rag_pipeline.py V3.
+- Não depende de Streamlit.
+"""
+
+from __future__ import annotations
+
 from functools import lru_cache
+from pathlib import Path
 from threading import RLock
+from typing import Any, Dict, List, Sequence
 import json
 import os
 import tempfile
@@ -16,88 +58,200 @@ from db import get_connection
 
 ROOT = Path(__file__).resolve().parents[1]
 
-INDEX_DIR = ROOT / "storage" / "vector"
-INDEX_DIR.mkdir(parents=True, exist_ok=True)
+INDEX_DIR = (
+    ROOT
+    / "storage"
+    / "vector"
+)
+
+INDEX_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+
+# ------------------------------------------------------------
+# Modelo de embeddings
+# ------------------------------------------------------------
 
 EMBED_MODEL = os.getenv(
     "EMBEDDING_MODEL",
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-)
+).strip()
 
-EMBED_BATCH_SIZE = int(
-    os.getenv(
-        "EMBED_BATCH_SIZE",
-        "32",
+
+# ------------------------------------------------------------
+# Configurações
+# ------------------------------------------------------------
+
+try:
+    EMBED_BATCH_SIZE = max(
+        1,
+        int(
+            os.getenv(
+                "EMBED_BATCH_SIZE",
+                "32",
+            )
+        ),
     )
-)
+except (
+    TypeError,
+    ValueError,
+):
+    EMBED_BATCH_SIZE = 32
 
-# Cache em memória dos índices FAISS
-_INDEX_CACHE = {}
 
-# Protege operações simultâneas no cache
+try:
+    DEFAULT_TOP_K = max(
+        1,
+        int(
+            os.getenv(
+                "EMBEDDING_TOP_K",
+                "10",
+            )
+        ),
+    )
+except (
+    TypeError,
+    ValueError,
+):
+    DEFAULT_TOP_K = 10
+
+
+MAX_TOP_K = 100
+
+
+# ============================================================
+# CACHE
+# ============================================================
+
+_INDEX_CACHE: Dict[int, Dict[str, Any]] = {}
+
 _CACHE_LOCK = RLock()
 
 
 # ============================================================
-# MODELO DE EMBEDDINGS
+# MODELO
 # ============================================================
 
 @lru_cache(maxsize=1)
 def _load_model():
     """
-    Carrega o modelo de embeddings uma única vez por processo.
+    Carrega o modelo SentenceTransformer uma única vez
+    por processo.
     """
 
-    from sentence_transformers import SentenceTransformer
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise RuntimeError(
+            "sentence-transformers não está instalado."
+        ) from exc
 
-    return SentenceTransformer(
-        EMBED_MODEL
-    )
+    try:
+        return SentenceTransformer(
+            EMBED_MODEL
+        )
+
+    except Exception as exc:
+        raise RuntimeError(
+            f"Não foi possível carregar o modelo "
+            f"de embeddings: {EMBED_MODEL}"
+        ) from exc
+
+
+def embedding_model_name() -> str:
+    """
+    Retorna o nome do modelo atualmente configurado.
+    """
+
+    return EMBED_MODEL
 
 
 # ============================================================
-# CAMINHOS DO ÍNDICE
+# FAISS
 # ============================================================
 
-def _paths(org_id):
+def _load_faiss():
     """
-    Retorna os arquivos FAISS e metadados da organização.
+    Importa FAISS somente quando necessário.
+    """
+
+    try:
+        import faiss
+
+        return faiss
+
+    except ImportError as exc:
+
+        raise RuntimeError(
+            "faiss-cpu não está instalado."
+        ) from exc
+
+
+# ============================================================
+# CAMINHOS
+# ============================================================
+
+def _paths(
+    org_id: int,
+):
+    """
+    Retorna os caminhos do índice da organização.
     """
 
     org_id = int(org_id)
 
-    fp = INDEX_DIR / f"org_{org_id}.faiss"
-    mp = INDEX_DIR / f"org_{org_id}.json"
+    faiss_path = (
+        INDEX_DIR
+        / f"org_{org_id}.faiss"
+    )
 
-    return fp, mp
-
-
-def index_exists(org_id):
-    """
-    Verifica se o índice da organização existe.
-    """
-
-    fp, mp = _paths(org_id)
+    metadata_path = (
+        INDEX_DIR
+        / f"org_{org_id}.json"
+    )
 
     return (
-        fp.exists()
-        and mp.exists()
+        faiss_path,
+        metadata_path,
+    )
+
+
+def index_exists(
+    org_id: int,
+) -> bool:
+    """
+    Verifica se o índice vetorial existe.
+    """
+
+    faiss_path, metadata_path = _paths(
+        org_id
+    )
+
+    return (
+        faiss_path.is_file()
+        and metadata_path.is_file()
     )
 
 
 # ============================================================
-# INVALIDAÇÃO DO CACHE
+# CACHE DOS ÍNDICES
 # ============================================================
 
-def _invalidate_index_cache(org_id=None):
+def _invalidate_index_cache(
+    org_id: int | None = None,
+):
     """
-    Remove índice(s) do cache em memória.
+    Invalida o cache de um índice ou de todos os índices.
     """
 
     with _CACHE_LOCK:
 
         if org_id is None:
+
             _INDEX_CACHE.clear()
+
             return
 
         _INDEX_CACHE.pop(
@@ -107,37 +261,138 @@ def _invalidate_index_cache(org_id=None):
 
 
 # ============================================================
-# CARREGAMENTO DO FAISS
+# NORMALIZAÇÃO DE METADADOS
 # ============================================================
 
-def _load_index(org_id):
+def _normalize_metadata(
+    meta: Any,
+) -> List[Dict[str, Any]]:
     """
-    Carrega FAISS + metadados.
-
-    Utiliza cache em memória e verifica alteração
-    dos arquivos.
+    Garante que os metadados tenham formato de lista.
     """
 
-    import faiss
-
-    org_id = int(org_id)
-
-    fp, mp = _paths(org_id)
-
-    if (
-        not fp.exists()
-        or not mp.exists()
+    if not isinstance(
+        meta,
+        list,
     ):
-        return None, []
+        return []
+
+    normalized = []
+
+    for item in meta:
+
+        if not isinstance(
+            item,
+            dict,
+        ):
+            continue
+
+        if item.get("id") is None:
+            continue
+
+        if item.get(
+            "organization_id"
+        ) is None:
+            continue
+
+        if item.get(
+            "document_id"
+        ) is None:
+            continue
+
+        if not item.get(
+            "content"
+        ):
+            continue
+
+        try:
+
+            item = dict(item)
+
+            item["id"] = int(
+                item["id"]
+            )
+
+            item[
+                "organization_id"
+            ] = int(
+                item[
+                    "organization_id"
+                ]
+            )
+
+            item[
+                "document_id"
+            ] = int(
+                item[
+                    "document_id"
+                ]
+            )
+
+            normalized.append(
+                item
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            continue
+
+    return normalized
+
+
+# ============================================================
+# CARREGAMENTO DO ÍNDICE
+# ============================================================
+
+def _load_index(
+    org_id: int,
+):
+    """
+    Carrega FAISS e metadados.
+
+    Utiliza cache em memória e verifica se os arquivos
+    foram modificados.
+    """
+
+    faiss = _load_faiss()
+
+    org_id = int(
+        org_id
+    )
+
+    faiss_path, metadata_path = _paths(
+        org_id
+    )
+
+    if not (
+        faiss_path.exists()
+        and metadata_path.exists()
+    ):
+        return (
+            None,
+            [],
+        )
 
     try:
 
-        faiss_mtime = fp.stat().st_mtime_ns
-        meta_mtime = mp.stat().st_mtime_ns
+        faiss_mtime = (
+            faiss_path.stat()
+            .st_mtime_ns
+        )
+
+        metadata_mtime = (
+            metadata_path.stat()
+            .st_mtime_ns
+        )
 
     except OSError:
 
-        return None, []
+        return (
+            None,
+            [],
+        )
 
     with _CACHE_LOCK:
 
@@ -147,47 +402,69 @@ def _load_index(org_id):
 
         if cached:
 
-            cached_faiss_mtime = cached.get(
-                "faiss_mtime"
-            )
-
-            cached_meta_mtime = cached.get(
-                "meta_mtime"
-            )
-
             if (
-                cached_faiss_mtime == faiss_mtime
-                and cached_meta_mtime == meta_mtime
+                cached.get(
+                    "faiss_mtime"
+                )
+                == faiss_mtime
+                and cached.get(
+                    "metadata_mtime"
+                )
+                == metadata_mtime
             ):
 
                 return (
-                    cached["index"],
-                    cached["meta"],
+                    cached.get(
+                        "index"
+                    ),
+                    cached.get(
+                        "meta",
+                        [],
+                    ),
                 )
 
         try:
 
             index = faiss.read_index(
-                str(fp)
+                str(
+                    faiss_path
+                )
             )
 
-            meta = json.loads(
-                mp.read_text(
+            raw_metadata = json.loads(
+                metadata_path.read_text(
                     encoding="utf-8"
                 )
             )
 
-            if not isinstance(
-                meta,
-                list,
-            ):
-                meta = []
+            meta = _normalize_metadata(
+                raw_metadata
+            )
 
-            _INDEX_CACHE[org_id] = {
+            # ------------------------------------------------
+            # Validação básica
+            # ------------------------------------------------
+
+            if index.ntotal != len(meta):
+
+                # Índice e metadados estão inconsistentes.
+                _INDEX_CACHE.pop(
+                    org_id,
+                    None,
+                )
+
+                return (
+                    None,
+                    [],
+                )
+
+            _INDEX_CACHE[
+                org_id
+            ] = {
                 "index": index,
                 "meta": meta,
                 "faiss_mtime": faiss_mtime,
-                "meta_mtime": meta_mtime,
+                "metadata_mtime": metadata_mtime,
             }
 
             return (
@@ -197,13 +474,15 @@ def _load_index(org_id):
 
         except Exception:
 
-            # Índice corrompido ou incompatível.
             _INDEX_CACHE.pop(
                 org_id,
                 None,
             )
 
-            return None, []
+            return (
+                None,
+                [],
+            )
 
 
 # ============================================================
@@ -211,20 +490,23 @@ def _load_index(org_id):
 # ============================================================
 
 def _atomic_write_index(
-    org_id,
-    index,
-    meta,
+    org_id: int,
+    index: Any,
+    meta: Sequence[Dict[str, Any]],
 ):
     """
-    Grava FAISS e JSON de forma atômica.
-
-    Evita deixar o sistema com um índice parcialmente
-    gravado caso o processo seja interrompido.
+    Salva FAISS e metadados de maneira atômica.
     """
 
-    import faiss
+    faiss = _load_faiss()
 
-    fp, mp = _paths(org_id)
+    org_id = int(
+        org_id
+    )
+
+    faiss_path, metadata_path = _paths(
+        org_id
+    )
 
     INDEX_DIR.mkdir(
         parents=True,
@@ -232,7 +514,7 @@ def _atomic_write_index(
     )
 
     faiss_tmp = None
-    meta_tmp = None
+    metadata_tmp = None
 
     try:
 
@@ -242,6 +524,7 @@ def _atomic_write_index(
 
         with tempfile.NamedTemporaryFile(
             suffix=".faiss",
+            prefix=f"org_{org_id}_",
             dir=INDEX_DIR,
             delete=False,
         ) as tmp:
@@ -252,32 +535,30 @@ def _atomic_write_index(
 
         faiss.write_index(
             index,
-            str(faiss_tmp),
-        )
-
-        os.replace(
-            faiss_tmp,
-            fp,
+            str(
+                faiss_tmp
+            ),
         )
 
         # ----------------------------------------------------
-        # METADADOS
+        # JSON
         # ----------------------------------------------------
 
         with tempfile.NamedTemporaryFile(
             suffix=".json",
+            prefix=f"org_{org_id}_",
             dir=INDEX_DIR,
             mode="w",
             encoding="utf-8",
             delete=False,
         ) as tmp:
 
-            meta_tmp = Path(
+            metadata_tmp = Path(
                 tmp.name
             )
 
             json.dump(
-                meta,
+                list(meta),
                 tmp,
                 ensure_ascii=False,
                 separators=(
@@ -288,15 +569,28 @@ def _atomic_write_index(
 
             tmp.flush()
 
+            os.fsync(
+                tmp.fileno()
+            )
+
+        # ----------------------------------------------------
+        # Substituição
+        # ----------------------------------------------------
+
         os.replace(
-            meta_tmp,
-            mp,
+            faiss_tmp,
+            faiss_path,
+        )
+
+        os.replace(
+            metadata_tmp,
+            metadata_path,
         )
 
     finally:
 
         if (
-            faiss_tmp
+            faiss_tmp is not None
             and faiss_tmp.exists()
         ):
 
@@ -306,12 +600,12 @@ def _atomic_write_index(
                 pass
 
         if (
-            meta_tmp
-            and meta_tmp.exists()
+            metadata_tmp is not None
+            and metadata_tmp.exists()
         ):
 
             try:
-                meta_tmp.unlink()
+                metadata_tmp.unlink()
             except OSError:
                 pass
 
@@ -325,27 +619,28 @@ def _atomic_write_index(
 
 
 # ============================================================
-# BUSCA DE CHUNKS NO BANCO
+# BANCO DE DADOS
 # ============================================================
 
 def _fetch_chunks(
-    org_id,
-    document_id=None,
+    org_id: int,
+    document_id: int | None = None,
 ):
     """
-    Busca chunks trazendo o nome do documento através
-    de JOIN.
+    Recupera chunks da organização.
 
-    Isso evita consultas N+1 durante a busca semântica.
+    O nome do documento é obtido através de JOIN.
     """
 
-    org_id = int(org_id)
+    org_id = int(
+        org_id
+    )
 
-    with get_connection() as c:
+    with get_connection() as connection:
 
         if document_id is not None:
 
-            rows = c.execute(
+            rows = connection.execute(
                 """
                 SELECT
                     ch.id,
@@ -371,7 +666,7 @@ def _fetch_chunks(
 
         else:
 
-            rows = c.execute(
+            rows = connection.execute(
                 """
                 SELECT
                     ch.id,
@@ -396,14 +691,17 @@ def _fetch_chunks(
     return rows
 
 
-# ============================================================
-# CONVERSÃO DE METADADOS
-# ============================================================
+def _row_to_metadata(
+    row,
+) -> Dict[str, Any]:
+    """
+    Converte uma linha SQLite para metadata do índice.
+    """
 
-def _row_to_metadata(row):
-    """
-    Converte Row SQLite em metadata persistível.
-    """
+    content = (
+        row["content"]
+        or ""
+    ).strip()
 
     return {
         "id": int(
@@ -419,70 +717,147 @@ def _row_to_metadata(row):
             row["document_name"]
             or "Desconhecido"
         ),
-        "content": row["content"],
+        "content": content,
         "page": row["page"],
-        "chunk_index": row["chunk_index"],
+        "chunk_index": row[
+            "chunk_index"
+        ],
     }
 
 
 # ============================================================
-# CONSTRUÇÃO COMPLETA DO ÍNDICE
+# ENCODING
 # ============================================================
 
-def build_index_for_org(
-    org_id,
-):
+def _encode_texts(
+    texts: Sequence[str],
+) -> np.ndarray:
     """
-    Reconstrói completamente o índice de uma organização.
-
-    Utilizado para:
-
-    - primeira indexação;
-    - recuperação;
-    - manutenção;
-    - reindexação manual.
+    Gera embeddings normalizados.
     """
 
-    org_id = int(org_id)
+    if not texts:
 
-    rows = _fetch_chunks(
-        org_id
-    )
-
-    if not rows:
-
-        _invalidate_index_cache(
-            org_id
+        return np.empty(
+            (
+                0,
+                0,
+            ),
+            dtype="float32",
         )
-
-        return 0
 
     model = _load_model()
 
-    texts = [
-        row["content"]
-        for row in rows
-        if row["content"]
-    ]
+    try:
 
-    if not texts:
-        return 0
+        vectors = model.encode(
+            list(texts),
+            normalize_embeddings=True,
+            show_progress_bar=False,
+            batch_size=EMBED_BATCH_SIZE,
+        )
 
-    vectors = model.encode(
-        texts,
-        normalize_embeddings=True,
-        show_progress_bar=False,
-        batch_size=EMBED_BATCH_SIZE,
-    )
+    except Exception as exc:
+
+        raise RuntimeError(
+            "Falha ao gerar embeddings."
+        ) from exc
 
     vectors = np.asarray(
         vectors,
         dtype="float32",
     )
 
-    import faiss
+    if vectors.ndim != 2:
 
-    dimension = vectors.shape[1]
+        raise RuntimeError(
+            "O modelo de embeddings retornou "
+            "um formato inválido."
+        )
+
+    if vectors.shape[0] != len(texts):
+
+        raise RuntimeError(
+            "Quantidade de embeddings diferente "
+            "da quantidade de textos."
+        )
+
+    return vectors
+
+
+# ============================================================
+# CONSTRUÇÃO DO ÍNDICE
+# ============================================================
+
+def build_index_for_org(
+    org_id: int,
+) -> int:
+    """
+    Reconstrói completamente o índice de uma organização.
+    """
+
+    org_id = int(
+        org_id
+    )
+
+    rows = _fetch_chunks(
+        org_id
+    )
+
+    valid_rows = [
+        row
+        for row in rows
+        if (
+            row["content"]
+            and str(
+                row["content"]
+            ).strip()
+        )
+    ]
+
+    # --------------------------------------------------------
+    # Organização sem documentos
+    # --------------------------------------------------------
+
+    if not valid_rows:
+
+        _invalidate_index_cache(
+            org_id
+        )
+
+        faiss_path, metadata_path = _paths(
+            org_id
+        )
+
+        for path in (
+            faiss_path,
+            metadata_path,
+        ):
+
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError:
+                pass
+
+        return 0
+
+    texts = [
+        str(
+            row["content"]
+        ).strip()
+        for row in valid_rows
+    ]
+
+    vectors = _encode_texts(
+        texts
+    )
+
+    faiss = _load_faiss()
+
+    dimension = int(
+        vectors.shape[1]
+    )
 
     index = faiss.IndexFlatIP(
         dimension
@@ -493,9 +868,10 @@ def build_index_for_org(
     )
 
     meta = [
-        _row_to_metadata(row)
-        for row in rows
-        if row["content"]
+        _row_to_metadata(
+            row
+        )
+        for row in valid_rows
     ]
 
     _atomic_write_index(
@@ -512,22 +888,40 @@ def build_index_for_org(
 # ============================================================
 
 def upsert_document_index(
-    org_id,
-    document_id,
-):
+    org_id: int,
+    document_id: int,
+) -> int:
     """
-    Adiciona somente os chunks do documento ao índice.
+    Adiciona ao índice somente os chunks ainda não indexados
+    de um documento.
 
-    Se o índice não existir, realiza a construção completa.
+    Se o índice estiver ausente ou inconsistente,
+    reconstrói a organização.
     """
 
-    org_id = int(org_id)
-    document_id = int(document_id)
+    org_id = int(
+        org_id
+    )
+
+    document_id = int(
+        document_id
+    )
 
     rows = _fetch_chunks(
         org_id,
         document_id=document_id,
     )
+
+    rows = [
+        row
+        for row in rows
+        if (
+            row["content"]
+            and str(
+                row["content"]
+            ).strip()
+        )
+    ]
 
     if not rows:
         return 0
@@ -537,7 +931,7 @@ def upsert_document_index(
     )
 
     # --------------------------------------------------------
-    # Índice ainda não existe
+    # Índice inexistente
     # --------------------------------------------------------
 
     if index is None:
@@ -547,11 +941,13 @@ def upsert_document_index(
         )
 
     # --------------------------------------------------------
-    # Chunks já existentes
+    # IDs existentes
     # --------------------------------------------------------
 
     existing_ids = {
-        int(item["id"])
+        int(
+            item["id"]
+        )
         for item in meta
         if item.get("id") is not None
     }
@@ -559,7 +955,9 @@ def upsert_document_index(
     new_rows = [
         row
         for row in rows
-        if int(row["id"])
+        if int(
+            row["id"]
+        )
         not in existing_ids
     ]
 
@@ -567,43 +965,31 @@ def upsert_document_index(
         return 0
 
     texts = [
-        row["content"]
+        str(
+            row["content"]
+        ).strip()
         for row in new_rows
-        if row["content"]
     ]
 
-    if not texts:
-        return 0
-
-    model = _load_model()
-
-    vectors = model.encode(
-        texts,
-        normalize_embeddings=True,
-        show_progress_bar=False,
-        batch_size=EMBED_BATCH_SIZE,
-    )
-
-    vectors = np.asarray(
-        vectors,
-        dtype="float32",
+    vectors = _encode_texts(
+        texts
     )
 
     # --------------------------------------------------------
-    # Segurança dimensional
+    # Verificação dimensional
     # --------------------------------------------------------
 
-    if index.d != vectors.shape[1]:
-
-        # Modelo atual incompatível.
-        # Rebuild completo é mais seguro.
+    if (
+        index.d
+        != vectors.shape[1]
+    ):
 
         return build_index_for_org(
             org_id
         )
 
     # --------------------------------------------------------
-    # Adiciona novos vetores
+    # Adição
     # --------------------------------------------------------
 
     index.add(
@@ -611,9 +997,10 @@ def upsert_document_index(
     )
 
     meta.extend(
-        _row_to_metadata(row)
+        _row_to_metadata(
+            row
+        )
         for row in new_rows
-        if row["content"]
     )
 
     _atomic_write_index(
@@ -630,17 +1017,23 @@ def upsert_document_index(
 # ============================================================
 
 def semantic_search(
-    query,
-    org_id,
-    top_k=10,
-):
+    query: str,
+    org_id: int,
+    top_k: int = DEFAULT_TOP_K,
+) -> List[Dict[str, Any]]:
     """
-    Busca semântica utilizando FAISS.
+    Executa busca semântica utilizando FAISS.
 
-    O modelo e o índice ficam em memória sempre que possível.
+    Retorna uma lista compatível com:
+
+        services.rag_pipeline
+        services.reranker
+        services.ai
     """
 
-    org_id = int(org_id)
+    org_id = int(
+        org_id
+    )
 
     query = (
         query
@@ -649,6 +1042,10 @@ def semantic_search(
 
     if not query:
         return []
+
+    # --------------------------------------------------------
+    # top_k
+    # --------------------------------------------------------
 
     try:
 
@@ -661,29 +1058,37 @@ def semantic_search(
         ValueError,
     ):
 
-        top_k = 10
+        top_k = DEFAULT_TOP_K
 
     top_k = max(
         1,
         min(
             top_k,
-            100,
+            MAX_TOP_K,
         ),
     )
 
     # --------------------------------------------------------
-    # Carrega índice
+    # Índice
     # --------------------------------------------------------
 
     index, meta = _load_index(
         org_id
     )
 
-    if index is None:
+    if (
+        index is None
+        or not meta
+    ):
 
-        build_index_for_org(
-            org_id
-        )
+        try:
+
+            build_index_for_org(
+                org_id
+            )
+
+        except Exception:
+            return []
 
         index, meta = _load_index(
             org_id
@@ -692,31 +1097,51 @@ def semantic_search(
     if (
         index is None
         or not meta
+        or index.ntotal <= 0
     ):
         return []
 
-    if index.ntotal <= 0:
+    # --------------------------------------------------------
+    # Segurança
+    # --------------------------------------------------------
+
+    if index.ntotal != len(meta):
+
+        try:
+
+            build_index_for_org(
+                org_id
+            )
+
+            index, meta = _load_index(
+                org_id
+            )
+
+        except Exception:
+            return []
+
+    if (
+        index is None
+        or not meta
+    ):
         return []
 
     # --------------------------------------------------------
-    # Embedding da pergunta
+    # Embedding da consulta
     # --------------------------------------------------------
 
-    model = _load_model()
+    try:
 
-    query_vector = model.encode(
-        [query],
-        normalize_embeddings=True,
-        show_progress_bar=False,
-    )
+        query_vector = _encode_texts(
+            [query]
+        )
 
-    query_vector = np.asarray(
-        query_vector,
-        dtype="float32",
-    )
+    except Exception:
+
+        return []
 
     # --------------------------------------------------------
-    # Pesquisa FAISS
+    # Busca FAISS
     # --------------------------------------------------------
 
     search_k = min(
@@ -724,42 +1149,79 @@ def semantic_search(
         index.ntotal,
     )
 
-    scores, ids = index.search(
-        query_vector,
-        search_k,
-    )
+    try:
+
+        scores, ids = index.search(
+            query_vector,
+            search_k,
+        )
+
+    except Exception:
+
+        return []
 
     results = []
 
-    for score, idx in zip(
+    for score, position in zip(
         scores[0],
         ids[0],
     ):
 
-        idx = int(
-            idx
+        position = int(
+            position
         )
 
         if (
-            idx < 0
-            or idx >= len(meta)
+            position < 0
+            or position >= len(meta)
         ):
             continue
 
-        item = meta[idx]
+        item = meta[
+            position
+        ]
 
         # ----------------------------------------------------
         # Isolamento da organização
         # ----------------------------------------------------
 
-        if int(
-            item.get(
-                "organization_id",
-                -1,
+        try:
+
+            item_org_id = int(
+                item.get(
+                    "organization_id",
+                    -1,
+                )
             )
-        ) != org_id:
+
+        except (
+            TypeError,
+            ValueError,
+        ):
 
             continue
+
+        if item_org_id != org_id:
+            continue
+
+        # ----------------------------------------------------
+        # Conteúdo
+        # ----------------------------------------------------
+
+        content = (
+            item.get(
+                "content",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if not content:
+            continue
+
+        # ----------------------------------------------------
+        # Resultado padronizado
+        # ----------------------------------------------------
 
         results.append(
             {
@@ -768,7 +1230,9 @@ def semantic_search(
                 ),
 
                 "document_id": int(
-                    item["document_id"]
+                    item[
+                        "document_id"
+                    ]
                 ),
 
                 "organization_id": org_id,
@@ -778,10 +1242,7 @@ def semantic_search(
                     "Desconhecido",
                 ),
 
-                "content": item.get(
-                    "content",
-                    "",
-                ),
+                "content": content,
 
                 "page": item.get(
                     "page",
@@ -803,14 +1264,177 @@ def semantic_search(
 
 
 # ============================================================
+# BUSCA COM FILTRO POR DOCUMENTO
+# ============================================================
+
+def semantic_search_document(
+    query: str,
+    org_id: int,
+    document_id: int,
+    top_k: int = DEFAULT_TOP_K,
+) -> List[Dict[str, Any]]:
+    """
+    Busca semântica restrita a um documento.
+
+    Utiliza os chunks do documento diretamente e calcula
+    embeddings temporários para a busca.
+    """
+
+    org_id = int(
+        org_id
+    )
+
+    document_id = int(
+        document_id
+    )
+
+    query = (
+        query
+        or ""
+    ).strip()
+
+    if not query:
+        return []
+
+    rows = _fetch_chunks(
+        org_id,
+        document_id=document_id,
+    )
+
+    rows = [
+        row
+        for row in rows
+        if (
+            row["content"]
+            and str(
+                row["content"]
+            ).strip()
+        )
+    ]
+
+    if not rows:
+        return []
+
+    try:
+
+        top_k = int(
+            top_k
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+
+        top_k = DEFAULT_TOP_K
+
+    top_k = max(
+        1,
+        min(
+            top_k,
+            MAX_TOP_K,
+        ),
+    )
+
+    texts = [
+        str(
+            row["content"]
+        ).strip()
+        for row in rows
+    ]
+
+    try:
+
+        vectors = _encode_texts(
+            texts
+        )
+
+        query_vector = _encode_texts(
+            [query]
+        )
+
+    except Exception:
+
+        return []
+
+    # --------------------------------------------------------
+    # Similaridade por produto escalar.
+    #
+    # Como os embeddings estão normalizados,
+    # equivale à similaridade de cosseno.
+    # --------------------------------------------------------
+
+    scores = np.dot(
+        vectors,
+        query_vector[0],
+    )
+
+    ranked_indices = np.argsort(
+        -scores
+    )[
+        : min(
+            top_k,
+            len(scores),
+        )
+    ]
+
+    results = []
+
+    for position in ranked_indices:
+
+        row = rows[
+            int(position)
+        ]
+
+        results.append(
+            {
+                "chunk_id": int(
+                    row["id"]
+                ),
+
+                "document_id": int(
+                    row["document_id"]
+                ),
+
+                "organization_id": org_id,
+
+                "document": (
+                    row[
+                        "document_name"
+                    ]
+                    or "Desconhecido"
+                ),
+
+                "content": str(
+                    row["content"]
+                ).strip(),
+
+                "page": row["page"],
+
+                "chunk_index": row[
+                    "chunk_index"
+                ],
+
+                "retriever_score": float(
+                    scores[
+                        int(position)
+                    ]
+                ),
+            }
+        )
+
+    return results
+
+
+# ============================================================
 # MANUTENÇÃO
 # ============================================================
 
 def rebuild_index(
-    org_id,
-):
+    org_id: int,
+) -> int:
     """
-    Alias explícito para reindexação manual.
+    Rebuild explícito do índice.
     """
 
     return build_index_for_org(
@@ -818,15 +1442,52 @@ def rebuild_index(
     )
 
 
+def delete_index(
+    org_id: int,
+) -> bool:
+    """
+    Remove o índice vetorial de uma organização.
+    """
+
+    org_id = int(
+        org_id
+    )
+
+    faiss_path, metadata_path = _paths(
+        org_id
+    )
+
+    removed = False
+
+    _invalidate_index_cache(
+        org_id
+    )
+
+    for path in (
+        faiss_path,
+        metadata_path,
+    ):
+
+        try:
+
+            if path.exists():
+
+                path.unlink()
+
+                removed = True
+
+        except OSError:
+            pass
+
+    return removed
+
+
 def clear_embedding_cache():
     """
-    Limpa modelos e índices carregados em memória.
+    Limpa:
 
-    Útil para:
-
-    - troca de modelo;
-    - manutenção;
-    - testes.
+    - modelo SentenceTransformer;
+    - índices FAISS em memória.
     """
 
     _invalidate_index_cache()
@@ -835,22 +1496,149 @@ def clear_embedding_cache():
 
 
 # ============================================================
-# TESTE DO MÓDULO
+# ESTATÍSTICAS DO ÍNDICE
 # ============================================================
 
-def self_test():
+def index_stats(
+    org_id: int,
+) -> Dict[str, Any]:
     """
-    Teste básico das funções principais.
+    Retorna informações básicas do índice.
+    """
 
-    Não carrega o modelo nem FAISS.
+    org_id = int(
+        org_id
+    )
+
+    index, meta = _load_index(
+        org_id
+    )
+
+    if (
+        index is None
+        or not meta
+    ):
+
+        return {
+            "organization_id": org_id,
+            "exists": False,
+            "vectors": 0,
+            "metadata": 0,
+            "dimension": 0,
+            "model": EMBED_MODEL,
+        }
+
+    return {
+        "organization_id": org_id,
+        "exists": True,
+        "vectors": int(
+            index.ntotal
+        ),
+        "metadata": len(
+            meta
+        ),
+        "dimension": int(
+            index.d
+        ),
+        "model": EMBED_MODEL,
+    }
+
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+def embeddings_status() -> Dict[str, Any]:
+    """
+    Retorna o estado do serviço de embeddings.
+
+    Não carrega o modelo para evitar custo desnecessário.
+    """
+
+    try:
+
+        import sentence_transformers
+
+        sentence_transformers_version = (
+            getattr(
+                sentence_transformers,
+                "__version__",
+                "unknown",
+            )
+        )
+
+    except Exception:
+
+        sentence_transformers_version = None
+
+    try:
+
+        import faiss
+
+        faiss_available = True
+
+        faiss_version = getattr(
+            faiss,
+            "__version__",
+            "unknown",
+        )
+
+    except Exception:
+
+        faiss_available = False
+        faiss_version = None
+
+    return {
+        "status": (
+            "ready"
+            if faiss_available
+            and sentence_transformers_version
+            else "not_ready"
+        ),
+
+        "model": EMBED_MODEL,
+
+        "batch_size": EMBED_BATCH_SIZE,
+
+        "faiss_available": faiss_available,
+
+        "faiss_version": faiss_version,
+
+        "sentence_transformers_version": (
+            sentence_transformers_version
+        ),
+
+        "index_directory": str(
+            INDEX_DIR
+        ),
+    }
+
+
+# ============================================================
+# SELF TEST
+# ============================================================
+
+def self_test() -> Dict[str, Any]:
+    """
+    Teste estrutural.
+
+    Não carrega modelo nem cria índice.
     """
 
     required = [
+        "_load_model",
+        "_load_index",
+        "_fetch_chunks",
+        "_encode_texts",
+        "build_index_for_org",
         "upsert_document_index",
         "semantic_search",
-        "build_index_for_org",
+        "semantic_search_document",
         "rebuild_index",
+        "delete_index",
         "index_exists",
+        "index_stats",
+        "embeddings_status",
         "clear_embedding_cache",
     ]
 
@@ -862,9 +1650,22 @@ def self_test():
 
     return {
         "valid": not missing,
-        "module": "services.embeddings",
+
+        "module": (
+            "services.embeddings"
+        ),
+
         "required_functions": required,
+
         "missing_functions": missing,
+
+        "model": EMBED_MODEL,
+
+        "batch_size": EMBED_BATCH_SIZE,
+
+        "index_directory": str(
+            INDEX_DIR
+        ),
     }
 
 
@@ -876,33 +1677,43 @@ if __name__ == "__main__":
 
     result = self_test()
 
-    print("=" * 60)
-    print("EMBEDDINGS.PY V3 - SELF TEST")
-    print("=" * 60)
+    print("=" * 70)
+    print(
+        "EMBEDDINGS.PY V3 - SELF TEST"
+    )
+    print("=" * 70)
 
     print(
-        f"Status: "
+        "Status              : "
         f"{'OK' if result['valid'] else 'ERRO'}"
     )
 
     print(
-        f"Funções obrigatórias: "
+        "Modelo              : "
+        f"{result['model']}"
+    )
+
+    print(
+        "Batch size          : "
+        f"{result['batch_size']}"
+    )
+
+    print(
+        "Funções obrigatórias: "
         f"{len(result['required_functions'])}"
     )
 
     print(
-        f"Funções ausentes: "
+        "Funções ausentes    : "
         f"{result['missing_functions']}"
     )
 
     print(
-        f"Modelo: "
-        f"{EMBED_MODEL}"
+        "Diretório dos índices:"
     )
 
     print(
-        f"Batch size: "
-        f"{EMBED_BATCH_SIZE}"
+        f"  {result['index_directory']}"
     )
 
-    print("=" * 60)
+    print("=" * 70)

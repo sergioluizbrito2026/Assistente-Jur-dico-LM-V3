@@ -7,7 +7,7 @@ RAG -> Retriever -> Reranker -> Guard -> Orchestrator
      -> LLM -> Citações -> Evaluation
 """
 
-```python
+
 from __future__ import annotations
 
 import inspect

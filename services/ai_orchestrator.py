@@ -1,8 +1,3 @@
-from services.agents import legal_agent
-from services.agents import risk_agent
-from services.agents import summary_agent
-from services.agents import guard_agent
-
 
 """
 AI Orchestrator - Assistente Jurídico IA SaaS V3
@@ -36,6 +31,15 @@ AI Service
 LLM
 """
 
+from __future__ import annotations
+
+import logging
+import time
+from typing import Any, Dict
+
+from services.agents import legal_agent
+from services.agents import risk_agent
+from services.agents import summary_agent
 from services.rag_pipeline import rag_answer
 
 
@@ -616,4 +620,3 @@ def orchestrator_status() -> Dict[str, Any]:
         "max_top_k": MAX_TOP_K,
         "max_rerank_k": MAX_RERANK_K,
     }
-

@@ -1,3 +1,29 @@
+```python
+"""
+Assistente Jurídico SaaS IA V3
+db.py
+
+Camada central de persistência SQLite.
+
+Responsabilidades:
+- conexão SQLite;
+- inicialização do banco;
+- criação das tabelas;
+- índices de performance;
+- seed demonstrativo;
+- integridade referencial;
+- compatibilidade com os serviços V3.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import sqlite3
+```
+
 from __future__ import annotations
 
 import inspect
@@ -10,7 +36,6 @@ import streamlit as st
 # BANCO DE DADOS
 # ============================================================
 
-from db import init_db, seed_demo
 
 # ============================================================
 # SERVIÇOS

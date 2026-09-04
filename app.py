@@ -533,6 +533,7 @@ def render_citations(citations):
 def render_diagnostic(result):
     """
     Mostra diagnóstico técnico da execução.
+    Versão segura contra SyntaxError em f-strings.
     """
 
     result = safe_dict(result)
@@ -544,49 +545,63 @@ def render_diagnostic(result):
 
         c1, c2, c3 = st.columns(3)
 
+        agent = str(
+            result.get("agent", "N/D")
+        )
+
+        intent = str(
+            result.get("intent", "N/D")
+        )
+
+        citations = safe_list(
+            result.get("citations")
+        )
+
+        evidence_count = result.get(
+            "evidence_count",
+            len(citations),
+        )
+
+        retrieved = safe_list(
+            result.get("retrieved")
+        )
+
+        reranked = safe_list(
+            result.get("reranked")
+        )
+
+        latency = result.get(
+            "latency_ms",
+            "N/D",
+        )
+
         c1.write(
-            f"**Agente:** "
-            f"{result.get('agent', 'N/D')}"
+            "**Agente:** " + agent
         )
 
         c2.write(
-            f"**Intent:** "
-            f"{result.get('intent', 'N/D')}"
+            "**Intent:** " + intent
         )
 
         c3.write(
-            f"**Evidências:** "
-            f"{result.get(
-                'evidence_count',
-                len(
-                    safe_list(
-                        result.get("citations")
-                    )
-                ),
-            )}"
+            "**Evidências:** "
+            + str(evidence_count)
         )
 
         c1.write(
-            f"**Documentos recuperados:** "
-            f"{len(
-                safe_list(
-                    result.get("retrieved")
-                )
-            )}"
+            "**Documentos recuperados:** "
+            + str(len(retrieved))
         )
 
         c2.write(
-            f"**Chunks reranked:** "
-            f"{len(
-                safe_list(
-                    result.get("reranked")
-                )
-            )}"
+            "**Chunks reranked:** "
+            + str(len(reranked))
         )
 
         c3.write(
-            f"**Latência:** "
-            f"{result.get('latency_ms', 'N/D')} ms"
+            "**Latência:** "
+            + str(latency)
+            + " ms"
         )
 
         guard = result.get(
@@ -601,23 +616,27 @@ def render_diagnostic(result):
                 True,
             )
 
-            st.write(
-                "**Guard Agent:** "
-                + (
-                    "🟢 Permitido"
-                    if allowed
-                    else "🔴 Bloqueado"
+            if allowed:
+                st.write(
+                    "**Guard Agent:** 🟢 Permitido"
                 )
-            )
+            else:
+                st.write(
+                    "**Guard Agent:** 🔴 Bloqueado"
+                )
 
-        if result.get("reason"):
+        reason = result.get("reason")
+
+        if reason:
             st.info(
-                str(result["reason"])
+                str(reason)
             )
 
-        if result.get("error"):
+        error = result.get("error")
+
+        if error:
             st.error(
-                str(result["error"])
+                str(error)
             )
 
 

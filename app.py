@@ -19,7 +19,6 @@ import streamlit as st
 from db import init_db, seed_demo
 
 from services.audit import audit
-from services.auth import authenticate, get_current_user, logout
 from services.cases import create_case, list_cases
 from services.documents import list_documents
 from services.evaluation import evaluate_answer

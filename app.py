@@ -15,6 +15,25 @@ from typing import Any, Dict
 
 import streamlit as st
 
+# ============================================================
+# BANCO DE DADOS
+# ============================================================
+
+try:
+    from db import init_db, seed_demo
+
+except Exception as exc:
+    st.error("Erro ao carregar o arquivo db.py.")
+
+    with st.expander("Detalhes técnicos"):
+        st.code(
+            f"{type(exc).__name__}: {exc}\n\n"
+            f"{traceback.format_exc()}"
+        )
+
+    st.stop()
+
+
 from services.audit import audit
 from services.auth import authenticate, get_current_user, logout
 from services.cases import create_case, list_cases
@@ -38,11 +57,12 @@ st.set_page_config(
 
 
 # ============================================================
-# BANCO DE DADOS
+# INICIALIZAÇÃO DO BANCO
 # ============================================================
 
 try:
     init_db()
+
 except Exception as exc:
     st.error("Erro ao inicializar o banco de dados.")
 
@@ -54,8 +74,10 @@ except Exception as exc:
 
     st.stop()
 
+
 try:
     seed_demo()
+
 except Exception as exc:
     st.warning(
         "O banco foi inicializado, mas os dados de demonstração "
@@ -68,6 +90,17 @@ except Exception as exc:
             f"{traceback.format_exc()}"
         )
 
+
+# ============================================================
+# CONFIGURAÇÃO
+# ============================================================
+
+st.set_page_config(
+    page_title="Assistente Jurídico IA",
+    page_icon="⚖️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
 # ============================================================
 # DESIGN SYSTEM

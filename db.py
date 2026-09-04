@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import sqlite3
-```
+
 
 from __future__ import annotations
 
@@ -32,10 +32,14 @@ from typing import Any, Dict
 
 import streamlit as st
 
-# ============================================================
-# BANCO DE DADOS
-# ============================================================
 
+BASE_DIR = Path(__file__).resolve().parent
+
+DB_PATH = (
+    BASE_DIR
+    / "database"
+    / "app.db"
+)
 
 # ============================================================
 # SERVIÇOS

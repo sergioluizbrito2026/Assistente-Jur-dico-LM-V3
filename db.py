@@ -215,38 +215,29 @@ def seed_demo():
         # Usuário administrador demo
         # ----------------------------------------------------
 
-        user_exists = c.execute(
-            """
-            SELECT 1
-            FROM users
-            WHERE email = ?
-            LIMIT 1
-            """,
-            ("admin@demo.local",),
-        ).fetchone()
-
-        if not user_exists:
-            c.execute(
-                """
-                INSERT INTO users(
-                    organization_id,
-                    name,
-                    email,
-                    password_hash,
-                    role,
-                    created_at
-                )
-                VALUES(?,?,?,?,?,?)
-                """,
-                (
-                    org,
-                    "Dr. João Silva",
-                    "admin@demo.local",
-                    hash_password("admin123"),
-                    "Administrador",
-                    now,
-                ),
-            )
+        c.execute(
+    """
+    INSERT INTO cases(
+        organization_id,
+        title,
+        client,
+        category,
+        priority,
+        status,
+        created_at
+    )
+    VALUES(?,?,?,?,?,?,?)
+    """,
+    (
+        org,
+        "Ação de Cobrança",
+        "Cliente Exemplo",
+        "Cível",
+        "Alta",
+        "Em andamento",
+        now,
+    ),
+)
 
         # ----------------------------------------------------
         # Documentos demonstrativos

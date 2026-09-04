@@ -1,27 +1,72 @@
-from pathlib import Path
+```python
+"""
+Assistente Jurídico SaaS IA V3
+db.py
+
+Camada central de persistência SQLite.
+
+Responsabilidades:
+- conexão SQLite;
+- inicialização do banco;
+- criação das tabelas;
+- índices de performance;
+- seed demonstrativo;
+- integridade referencial;
+- compatibilidade com os serviços V3.
+
+Arquitetura:
+
+    Streamlit
+        ↓
+       db.py
+        ↓
+     SQLite
+        ↓
+    Serviços V3
+"""
+
+from __future__ import annotations
+
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
+
 import sqlite3
 
 
 # ============================================================
-# CONFIGURAÇÃO DO BANCO
+# CONFIGURAÇÃO
 # ============================================================
 
-DB_PATH = Path(__file__).parent / "database" / "app.db"
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+BASE_DIR = Path(__file__).resolve().parent
+
+DB_PATH = (
+    BASE_DIR
+    / "database"
+    / "app.db"
+)
+
+DB_PATH.parent.mkdir(
+    parents=True,
+    exist_ok=True,
+)
 
 
 # ============================================================
-# CONEXÃO OTIMIZADA SQLITE
+# CONEXÃO SQLITE
 # ============================================================
 
-def get_connection():
+def get_connection() -> sqlite3.Connection:
     """
-    Abre uma conexão SQLite otimizada para o SaaS.
+    Abre uma conexão SQLite otimizada.
 
-    WAL permite leitura concorrente sem bloquear o banco durante
-    pequenas operações de escrita.
+    Configurações:
+    - WAL;
+    - foreign keys;
+    - busy timeout;
+    - row factory.
     """
+
     conn = sqlite3.connect(
         DB_PATH,
         timeout=30,
@@ -31,37 +76,58 @@ def get_connection():
     conn.row_factory = sqlite3.Row
 
     # Integridade referencial
-    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(
+        "PRAGMA foreign_keys = ON"
+    )
 
-    # Melhor concorrência entre Streamlit e operações de escrita
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA synchronous = NORMAL")
+    # Melhor concorrência
+    conn.execute(
+        "PRAGMA journal_mode = WAL"
+    )
 
-    # Evita falha imediata quando o banco estiver temporariamente ocupado
-    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute(
+        "PRAGMA synchronous = NORMAL"
+    )
+
+    # Evita erro imediato em concorrência
+    conn.execute(
+        "PRAGMA busy_timeout = 30000"
+    )
 
     return conn
 
 
 # ============================================================
-# INICIALIZAÇÃO DO BANCO
+# INICIALIZAÇÃO
 # ============================================================
 
-def init_db():
+def init_db() -> None:
     """
-    Cria as tabelas e índices necessários.
-    É seguro executar em cada inicialização do Streamlit.
+    Cria todas as tabelas e índices necessários.
+
+    Pode ser executado várias vezes sem destruir dados.
     """
 
     with get_connection() as c:
+
         c.executescript(
             """
+            PRAGMA foreign_keys = ON;
+
+            -- =================================================
+            -- ORGANIZAÇÕES
+            -- =================================================
+
             CREATE TABLE IF NOT EXISTS organizations(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 plan TEXT DEFAULT 'Profissional',
                 created_at TEXT NOT NULL
             );
+
+            -- =================================================
+            -- USUÁRIOS
+            -- =================================================
 
             CREATE TABLE IF NOT EXISTS users(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,9 +137,15 @@ def init_db():
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL,
                 created_at TEXT NOT NULL,
+
                 FOREIGN KEY(organization_id)
                     REFERENCES organizations(id)
+                    ON DELETE CASCADE
             );
+
+            -- =================================================
+            -- DOCUMENTOS
+            -- =================================================
 
             CREATE TABLE IF NOT EXISTS documents(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,9 +157,15 @@ def init_db():
                 chunks INTEGER DEFAULT 0,
                 ocr_pages INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL,
+
                 FOREIGN KEY(organization_id)
                     REFERENCES organizations(id)
+                    ON DELETE CASCADE
             );
+
+            -- =================================================
+            -- CHUNKS
+            -- =================================================
 
             CREATE TABLE IF NOT EXISTS chunks(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,10 +176,19 @@ def init_db():
                 chunk_index INTEGER,
                 token_estimate INTEGER,
                 metadata TEXT,
+
                 FOREIGN KEY(document_id)
                     REFERENCES documents(id)
+                    ON DELETE CASCADE,
+
+                FOREIGN KEY(organization_id)
+                    REFERENCES organizations(id)
                     ON DELETE CASCADE
             );
+
+            -- =================================================
+            -- PROCESSOS / CASOS
+            -- =================================================
 
             CREATE TABLE IF NOT EXISTS cases(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,8 +198,16 @@ def init_db():
                 category TEXT,
                 priority TEXT,
                 status TEXT DEFAULT 'Em andamento',
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+
+                FOREIGN KEY(organization_id)
+                    REFERENCES organizations(id)
+                    ON DELETE CASCADE
             );
+
+            -- =================================================
+            -- AUDITORIA
+            -- =================================================
 
             CREATE TABLE IF NOT EXISTS audit_logs(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,21 +217,35 @@ def init_db():
                 entity_type TEXT,
                 entity_id INTEGER,
                 metadata TEXT,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+
+                FOREIGN KEY(organization_id)
+                    REFERENCES organizations(id)
+                    ON DELETE CASCADE,
+
+                FOREIGN KEY(user_id)
+                    REFERENCES users(id)
+                    ON DELETE SET NULL
             );
 
             -- =================================================
-            -- ÍNDICES DE PERFORMANCE
+            -- ÍNDICES
             -- =================================================
 
             CREATE INDEX IF NOT EXISTS idx_users_org
                 ON users(organization_id);
 
+            CREATE INDEX IF NOT EXISTS idx_users_email
+                ON users(email);
+
             CREATE INDEX IF NOT EXISTS idx_documents_org
                 ON documents(organization_id);
 
             CREATE INDEX IF NOT EXISTS idx_documents_org_name
-                ON documents(organization_id, name);
+                ON documents(
+                    organization_id,
+                    name
+                );
 
             CREATE INDEX IF NOT EXISTS idx_chunks_org
                 ON chunks(organization_id);
@@ -145,10 +254,19 @@ def init_db():
                 ON chunks(document_id);
 
             CREATE INDEX IF NOT EXISTS idx_chunks_org_document
-                ON chunks(organization_id, document_id);
+                ON chunks(
+                    organization_id,
+                    document_id
+                );
 
             CREATE INDEX IF NOT EXISTS idx_cases_org
                 ON cases(organization_id);
+
+            CREATE INDEX IF NOT EXISTS idx_cases_org_status
+                ON cases(
+                    organization_id,
+                    status
+                );
 
             CREATE INDEX IF NOT EXISTS idx_audit_org
                 ON audit_logs(organization_id);
@@ -163,24 +281,109 @@ def init_db():
 
 
 # ============================================================
+# ORGANIZAÇÃO
+# ============================================================
+
+def get_organization(
+    org_id: int,
+) -> Optional[Dict[str, Any]]:
+    """
+    Retorna uma organização pelo ID.
+    """
+
+    try:
+        org_id = int(org_id)
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return None
+
+    with get_connection() as c:
+
+        row = c.execute(
+            """
+            SELECT *
+            FROM organizations
+            WHERE id = ?
+            LIMIT 1
+            """,
+            (org_id,),
+        ).fetchone()
+
+    return dict(row) if row else None
+
+
+# ============================================================
+# USUÁRIO
+# ============================================================
+
+def get_user_by_email(
+    email: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Busca usuário pelo e-mail.
+    """
+
+    email = str(
+        email or ""
+    ).strip().lower()
+
+    if not email:
+        return None
+
+    with get_connection() as c:
+
+        row = c.execute(
+            """
+            SELECT
+                id,
+                organization_id,
+                name,
+                email,
+                password_hash,
+                role,
+                created_at
+            FROM users
+            WHERE LOWER(email) = ?
+            LIMIT 1
+            """,
+            (email,),
+        ).fetchone()
+
+    return dict(row) if row else None
+
+
+# ============================================================
 # SEED DEMO
 # ============================================================
 
-def seed_demo():
+def seed_demo() -> None:
     """
-    Cria somente os dados demonstrativos que ainda não existem.
+    Cria dados demonstrativos apenas quando ainda não existem.
 
-    IMPORTANTE:
-    O índice vetorial só é construído quando realmente existem
-    chunks novos. Isso evita reconstruir o FAISS em todo rerun
-    do Streamlit.
+    O seed é idempotente:
+    executar várias vezes não deve duplicar:
+    - usuários;
+    - documentos;
+    - casos.
+
+    O índice FAISS somente é reconstruído quando documentos
+    demonstrativos realmente são inseridos.
     """
 
     from security.passwords import hash_password
     from services.embeddings import build_index_for_org
 
-    now = datetime.now().isoformat(timespec="seconds")
+    now = datetime.now().isoformat(
+        timespec="seconds"
+    )
+
     needs_index = False
+
+    # ========================================================
+    # ORGANIZAÇÃO + DADOS
+    # ========================================================
 
     with get_connection() as c:
 
@@ -191,7 +394,10 @@ def seed_demo():
         c.execute(
             """
             INSERT OR IGNORE INTO organizations(
-                id, name, plan, created_at
+                id,
+                name,
+                plan,
+                created_at
             )
             VALUES(1, ?, ?, ?)
             """,
@@ -203,41 +409,62 @@ def seed_demo():
         )
 
         org_row = c.execute(
-            "SELECT id FROM organizations WHERE id = 1"
+            """
+            SELECT id
+            FROM organizations
+            WHERE id = 1
+            LIMIT 1
+            """
         ).fetchone()
 
         if not org_row:
             return
 
-        org = org_row["id"]
+        org = int(
+            org_row["id"]
+        )
 
         # ----------------------------------------------------
         # Usuário administrador demo
         # ----------------------------------------------------
 
-        c.execute(
-    """
-    INSERT INTO cases(
-        organization_id,
-        title,
-        client,
-        category,
-        priority,
-        status,
-        created_at
-    )
-    VALUES(?,?,?,?,?,?,?)
-    """,
-    (
-        org,
-        "Ação de Cobrança",
-        "Cliente Exemplo",
-        "Cível",
-        "Alta",
-        "Em andamento",
-        now,
-    ),
-)
+        user_exists = c.execute(
+            """
+            SELECT id
+            FROM users
+            WHERE email = ?
+            LIMIT 1
+            """,
+            (
+                "admin@demo.local",
+            ),
+        ).fetchone()
+
+        if not user_exists:
+
+            c.execute(
+                """
+                INSERT INTO users(
+                    organization_id,
+                    name,
+                    email,
+                    password_hash,
+                    role,
+                    created_at
+                )
+                VALUES(?,?,?,?,?,?)
+                """,
+                (
+                    org,
+                    "Dr. João Silva",
+                    "admin@demo.local",
+                    hash_password(
+                        "admin123"
+                    ),
+                    "Administrador",
+                    now,
+                ),
+            )
 
         # ----------------------------------------------------
         # Documentos demonstrativos
@@ -252,23 +479,33 @@ def seed_demo():
                 [
                     (
                         1,
-                        "A cláusula prevê rescisão unilateral e estabelece "
-                        "condições para encerramento do contrato. Recomenda-se "
-                        "verificar aviso prévio e penalidades aplicáveis.",
+                        (
+                            "A cláusula prevê rescisão unilateral "
+                            "e estabelece condições para "
+                            "encerramento do contrato. Recomenda-se "
+                            "verificar aviso prévio e penalidades "
+                            "aplicáveis."
+                        ),
                         0,
                     ),
                     (
                         2,
-                        "O contrato possui cláusula de confidencialidade e "
-                        "proteção de dados. Devem ser validados escopo, "
-                        "responsabilidades e medidas de segurança.",
+                        (
+                            "O contrato possui cláusula de "
+                            "confidencialidade e proteção de dados. "
+                            "Devem ser validados escopo, "
+                            "responsabilidades e medidas de segurança."
+                        ),
                         1,
                     ),
                     (
                         3,
-                        "A vigência contratual deve ser interpretada em "
-                        "conjunto com as regras de renovação e rescisão "
-                        "previstas no instrumento.",
+                        (
+                            "A vigência contratual deve ser "
+                            "interpretada em conjunto com as regras "
+                            "de renovação e rescisão previstas "
+                            "no instrumento."
+                        ),
                         2,
                     ),
                 ],
@@ -281,16 +518,25 @@ def seed_demo():
                 [
                     (
                         1,
-                        "A parte autora formula pedido de cobrança com "
-                        "fundamento em obrigação contratual e apresenta "
-                        "documentos como elementos de suporte.",
+                        (
+                            "A parte autora formula pedido de "
+                            "cobrança com fundamento em obrigação "
+                            "contratual e apresenta documentos "
+                            "como elementos de suporte."
+                        ),
                         0,
                     )
                 ],
             ),
         ]
 
-        for name, typ, pages, ocr, demo_chunks in demos:
+        for (
+            name,
+            typ,
+            pages,
+            ocr,
+            demo_chunks,
+        ) in demos:
 
             existing_doc = c.execute(
                 """
@@ -300,11 +546,18 @@ def seed_demo():
                   AND name = ?
                 LIMIT 1
                 """,
-                (org, name),
+                (
+                    org,
+                    name,
+                ),
             ).fetchone()
 
             if existing_doc:
                 continue
+
+            # ------------------------------------------------
+            # Documento
+            # ------------------------------------------------
 
             cur = c.execute(
                 """
@@ -332,9 +585,18 @@ def seed_demo():
                 ),
             )
 
-            did = cur.lastrowid
+            document_id = cur.lastrowid
 
-            for page, content, idx in demo_chunks:
+            # ------------------------------------------------
+            # Chunks
+            # ------------------------------------------------
+
+            for (
+                page,
+                content,
+                chunk_index,
+            ) in demo_chunks:
+
                 c.execute(
                     """
                     INSERT INTO chunks(
@@ -349,12 +611,15 @@ def seed_demo():
                     VALUES(?,?,?,?,?,?,?)
                     """,
                     (
-                        did,
+                        document_id,
                         org,
                         content,
                         page,
-                        idx,
-                        max(1, len(content) // 4),
+                        chunk_index,
+                        max(
+                            1,
+                            len(content) // 4,
+                        ),
                         "{}",
                     ),
                 )
@@ -362,19 +627,25 @@ def seed_demo():
             needs_index = True
 
         # ----------------------------------------------------
-        # Processo demonstrativo
+        # Caso demonstrativo
         # ----------------------------------------------------
 
-        case_count = c.execute(
+        case_exists = c.execute(
             """
-            SELECT COUNT(*)
+            SELECT id
             FROM cases
             WHERE organization_id = ?
+              AND title = ?
+            LIMIT 1
             """,
-            (org,),
-        ).fetchone()[0]
+            (
+                org,
+                "Ação de Cobrança",
+            ),
+        ).fetchone()
 
-        if case_count == 0:
+        if not case_exists:
+
             c.execute(
                 """
                 INSERT INTO cases(
@@ -383,9 +654,10 @@ def seed_demo():
                     client,
                     category,
                     priority,
+                    status,
                     created_at
                 )
-                VALUES(?,?,?,?,?,?)
+                VALUES(?,?,?,?,?,?,?)
                 """,
                 (
                     org,
@@ -393,18 +665,167 @@ def seed_demo():
                     "Cliente Exemplo",
                     "Cível",
                     "Alta",
+                    "Em andamento",
                     now,
                 ),
             )
 
-    # --------------------------------------------------------
-    # Só atualiza o índice quando houve documento novo
-    # --------------------------------------------------------
+    # ========================================================
+    # INDEXAÇÃO
+    # ========================================================
 
     if needs_index:
+
         try:
-            build_index_for_org(org)
+
+            build_index_for_org(
+                org
+            )
+
         except Exception:
-            # O banco continua funcionando mesmo se a camada
-            # vetorial estiver indisponível.
+            # O banco não deve deixar de funcionar
+            # caso embeddings/FAISS estejam indisponíveis.
             pass
+
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+def database_health() -> Dict[str, Any]:
+    """
+    Verifica se o banco está acessível.
+    """
+
+    try:
+
+        with get_connection() as c:
+
+            row = c.execute(
+                "SELECT 1 AS ok"
+            ).fetchone()
+
+            organizations = c.execute(
+                "SELECT COUNT(*) FROM organizations"
+            ).fetchone()[0]
+
+            users = c.execute(
+                "SELECT COUNT(*) FROM users"
+            ).fetchone()[0]
+
+            documents = c.execute(
+                "SELECT COUNT(*) FROM documents"
+            ).fetchone()[0]
+
+            chunks = c.execute(
+                "SELECT COUNT(*) FROM chunks"
+            ).fetchone()[0]
+
+            cases = c.execute(
+                "SELECT COUNT(*) FROM cases"
+            ).fetchone()[0]
+
+        return {
+            "status": "ok",
+            "database": str(DB_PATH),
+            "connection": bool(
+                row and row["ok"] == 1
+            ),
+            "organizations": organizations,
+            "users": users,
+            "documents": documents,
+            "chunks": chunks,
+            "cases": cases,
+        }
+
+    except Exception as exc:
+
+        return {
+            "status": "error",
+            "database": str(DB_PATH),
+            "connection": False,
+            "error": (
+                f"{type(exc).__name__}: "
+                f"{str(exc)[:300]}"
+            ),
+        }
+
+
+# ============================================================
+# TESTE DO MÓDULO
+# ============================================================
+
+def self_test() -> Dict[str, Any]:
+    """
+    Teste estrutural do banco.
+    """
+
+    required = [
+        "get_connection",
+        "init_db",
+        "seed_demo",
+        "get_organization",
+        "get_user_by_email",
+        "database_health",
+    ]
+
+    missing = [
+        name
+        for name in required
+        if name not in globals()
+    ]
+
+    return {
+        "module": "db.py",
+        "status": (
+            "ok"
+            if not missing
+            else "error"
+        ),
+        "database": str(DB_PATH),
+        "required_functions": required,
+        "missing_functions": missing,
+    }
+
+
+# ============================================================
+# EXECUÇÃO DIRETA
+# ============================================================
+
+if __name__ == "__main__":
+
+    init_db()
+
+    result = self_test()
+
+    print("=" * 60)
+    print("DB.PY V3 - SELF TEST")
+    print("=" * 60)
+
+    print(
+        f"Status: {result['status']}"
+    )
+
+    print(
+        f"Banco: {result['database']}"
+    )
+
+    print(
+        f"Funções obrigatórias: "
+        f"{len(result['required_functions'])}"
+    )
+
+    print(
+        f"Funções ausentes: "
+        f"{result['missing_functions']}"
+    )
+
+    health = database_health()
+
+    print(
+        f"Database health: "
+        f"{health['status']}"
+    )
+
+    print("=" * 60)
+```

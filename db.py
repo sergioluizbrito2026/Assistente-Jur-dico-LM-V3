@@ -1,4 +1,3 @@
-```python
 """
 Assistente Jurídico SaaS IA V3
 db.py

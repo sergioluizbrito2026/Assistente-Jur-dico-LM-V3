@@ -826,5 +826,3 @@ if __name__ == "__main__":
         f"{health['status']}"
     )
 
-    print("=" * 60)
-```

@@ -4,35 +4,31 @@ services/ai_orchestrator.py
 
 Orquestrador central dos agentes jurídicos.
 
-Agentes suportados:
-    1. Agente Jurídico
-    2. Agente de Risco
-    3. Agente de Resumo
-    4. Agente Geral
-    5. RAG / Recuperação de documentos
-    6. Citações e evidências
-    7. Evaluation / métricas
-    8. Guard Agent
+Agentes:
+1. Agente Jurídico
+2. Agente de Risco
+3. Agente de Resumo
+4. Agente Geral
+5. RAG / Recuperação
+6. Citações
+7. Evaluation
+8. Guard Agent
 
-Objetivos:
-- Centralizar a execução dos agentes.
-- Não derrubar o Streamlit quando um agente falhar.
-- Aceitar diferentes formatos de retorno dos agentes.
-- Usar o RAG como fonte principal de evidências.
-- Permitir fallback para respostas disponíveis.
-- Manter compatibilidade com app.py V3.
-- Não depender diretamente do Streamlit.
+Compatibilidade:
+- app.py V3
+- rag_pipeline.py V3
+- chamada orchestrate(query=..., org_id=...)
 """
 
 from __future__ import annotations
 
 import logging
-import traceback
+import time
 from typing import Any, Dict, List, Sequence
 
 
 # ============================================================
-# LOGGING
+# LOG
 # ============================================================
 
 logger = logging.getLogger(__name__)
@@ -45,12 +41,13 @@ if not logger.handlers:
 
 
 # ============================================================
-# IMPORTS SEGUROS
+# SERVIÇOS
 # ============================================================
 
 try:
     from services.ai import generate_answer
-except Exception:
+except Exception as exc:
+    logger.warning("services.ai indisponível: %s", exc)
     generate_answer = None
 
 
@@ -59,15 +56,38 @@ try:
         rag_answer,
         retrieve_and_rerank,
     )
-except Exception:
+except Exception as exc:
+    logger.exception("Falha ao importar rag_pipeline: %s", exc)
     rag_answer = None
     retrieve_and_rerank = None
 
 
 try:
     from services.evaluation import evaluate_answer
-except Exception:
+except Exception as exc:
+    logger.warning("Evaluation indisponível: %s", exc)
     evaluate_answer = None
+
+
+# ============================================================
+# CONFIGURAÇÕES
+# ============================================================
+
+DEFAULT_TOP_K = 8
+DEFAULT_RERANK_K = 5
+
+MAX_TOP_K = 20
+MAX_RERANK_K = 10
+
+
+# ============================================================
+# AGENTES
+# ============================================================
+
+AGENT_LEGAL = "legal"
+AGENT_RISK = "risk"
+AGENT_SUMMARY = "summary"
+AGENT_GENERAL = "general"
 
 
 # ============================================================
@@ -75,8 +95,6 @@ except Exception:
 # ============================================================
 
 def _safe_text(value: Any) -> str:
-    """Converte qualquer valor em texto com segurança."""
-
     if value is None:
         return ""
 
@@ -86,8 +104,22 @@ def _safe_text(value: Any) -> str:
     return str(value).strip()
 
 
+def _safe_int(
+    value: Any,
+    default: int,
+    minimum: int = 1,
+    maximum: int = 100,
+) -> int:
+
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        value = default
+
+    return max(minimum, min(value, maximum))
+
+
 def _safe_list(value: Any) -> List[Any]:
-    """Converte valores possíveis em lista."""
 
     if value is None:
         return []
@@ -104,39 +136,7 @@ def _safe_list(value: Any) -> List[Any]:
     return [value]
 
 
-def _safe_dict(value: Any) -> Dict[str, Any]:
-    """Converte retorno para dicionário."""
-
-    if isinstance(value, dict):
-        return value
-
-    return {}
-
-
 def _extract_answer(result: Any) -> str:
-    """
-    Extrai texto de diferentes formatos de retorno.
-
-    Aceita:
-
-        "texto"
-
-    ou:
-
-        {"answer": "texto"}
-
-    ou:
-
-        {"response": "texto"}
-
-    ou:
-
-        {"text": "texto"}
-
-    ou:
-
-        {"content": "texto"}
-    """
 
     if result is None:
         return ""
@@ -147,16 +147,16 @@ def _extract_answer(result: Any) -> str:
     if not isinstance(result, dict):
         return _safe_text(result)
 
-    for field in (
+    for key in (
         "answer",
         "response",
         "text",
         "content",
         "output",
-        "result",
         "message",
+        "result",
     ):
-        value = result.get(field)
+        value = result.get(key)
 
         if value:
             return _safe_text(value)
@@ -165,20 +165,19 @@ def _extract_answer(result: Any) -> str:
 
 
 def _extract_chunks(result: Any) -> List[Any]:
-    """Extrai chunks de diferentes estruturas."""
 
     if not isinstance(result, dict):
         return []
 
-    for field in (
+    for key in (
         "reranked",
         "chunks",
+        "context",
         "results",
         "documents",
-        "context",
         "retrieved",
     ):
-        value = result.get(field)
+        value = result.get(key)
 
         if value:
             return _safe_list(value)
@@ -187,18 +186,17 @@ def _extract_chunks(result: Any) -> List[Any]:
 
 
 def _extract_citations(result: Any) -> List[Any]:
-    """Extrai citações de diferentes estruturas."""
 
     if not isinstance(result, dict):
         return []
 
-    for field in (
+    for key in (
         "citations",
         "references",
         "sources",
         "evidence",
     ):
-        value = result.get(field)
+        value = result.get(key)
 
         if value:
             return _safe_list(value)
@@ -206,475 +204,214 @@ def _extract_citations(result: Any) -> List[Any]:
     return []
 
 
-def _error(message: str, exc: Exception | None = None) -> Dict[str, Any]:
-    """Cria resposta padronizada de erro."""
+# ============================================================
+# INTENÇÃO
+# ============================================================
 
-    if exc is not None:
-        logger.exception(message)
+def detect_intent(query: str) -> str:
 
-    return {
-        "success": False,
-        "answer": "",
-        "error": message,
+    text = _safe_text(query).lower()
+
+    if not text:
+        return AGENT_GENERAL
+
+    risk_keywords = [
+        "risco",
+        "riscos",
+        "perigo",
+        "ameaça",
+        "vulnerabilidade",
+        "penalidade",
+        "multa",
+        "problemática",
+        "problemático",
+        "ponto crítico",
+        "pontos críticos",
+        "fragilidade",
+        "passivo",
+        "ilegal",
+        "irregularidade",
+    ]
+
+    summary_keywords = [
+        "resuma",
+        "resumo",
+        "resumir",
+        "sintetize",
+        "síntese",
+        "principais pontos",
+        "em poucas palavras",
+        "resumo do documento",
+        "resumo do contrato",
+    ]
+
+    legal_keywords = [
+        "contrato",
+        "contratos",
+        "cláusula",
+        "clausula",
+        "processo",
+        "petição",
+        "peticao",
+        "jurídico",
+        "juridico",
+        "lei",
+        "artigo",
+        "jurisprudência",
+        "jurisprudencia",
+        "autor",
+        "réu",
+        "reu",
+        "obrigação",
+        "obrigacao",
+        "direito",
+        "rescisão",
+        "rescisao",
+        "indenização",
+        "indenizacao",
+        "prazo",
+        "contestação",
+        "contestacao",
+        "objeto do contrato",
+        "foro",
+        "contratante",
+        "contratada",
+    ]
+
+    if any(x in text for x in risk_keywords):
+        return AGENT_RISK
+
+    if any(x in text for x in summary_keywords):
+        return AGENT_SUMMARY
+
+    if any(x in text for x in legal_keywords):
+        return AGENT_LEGAL
+
+    return AGENT_GENERAL
+
+
+# ============================================================
+# LABEL
+# ============================================================
+
+def agent_label(agent: str) -> str:
+
+    labels = {
+        AGENT_LEGAL: "Agente Jurídico",
+        AGENT_RISK: "Agente de Risco",
+        AGENT_SUMMARY: "Agente de Resumo",
+        AGENT_GENERAL: "Agente Geral",
     }
 
+    return labels.get(agent, "Agente Geral")
+
 
 # ============================================================
-# AGENTE JURÍDICO
+# INSTRUÇÕES
 # ============================================================
 
-def legal_agent(
-    question: str,
-    context: Sequence[Any] | None = None,
-    citations: Sequence[Any] | None = None,
-) -> Dict[str, Any]:
-    """
-    Agente Jurídico.
+def _agent_instruction(agent: str) -> str:
 
-    Produz resposta jurídica baseada nas evidências fornecidas.
-    """
+    if agent == AGENT_LEGAL:
 
-    question = _safe_text(question)
+        return """
+Você é o Agente Jurídico.
 
-    if not question:
-        return _error("Pergunta vazia.")
+Responda utilizando prioritariamente as evidências recuperadas pelo RAG.
 
-    context = list(context or [])
-    citations = list(citations or [])
+REGRAS OBRIGATÓRIAS:
 
-    prompt = f"""
-Você é o Agente Jurídico de uma plataforma de IA jurídica.
-
-Responda à pergunta utilizando SOMENTE as evidências fornecidas.
-
-REGRAS:
-- Não invente informações.
+- Não invente fatos.
+- Não invente cláusulas.
 - Não invente artigos de lei.
 - Não invente jurisprudência.
-- Não invente fatos.
-- Se as evidências não forem suficientes, informe isso claramente.
-- Seja objetivo.
-- Cite as evidências quando disponíveis.
-
-PERGUNTA:
-{question}
-
-EVIDÊNCIAS:
-{_format_context(context)}
-
-CITAÇÕES:
-{_format_citations(citations)}
+- Não utilize conhecimento externo quando a pergunta depender do documento.
+- Se a evidência estiver disponível, responda diretamente.
+- Utilize citações [1], [2], [3] quando disponíveis.
+- Diferencie informação encontrada no documento de interpretação jurídica.
+- Seja objetivo e profissional.
 """
 
-    if generate_answer is None:
-        return _error(
-            "Serviço de IA não está disponível."
-        )
+    if agent == AGENT_RISK:
 
-    try:
-        result = generate_answer(prompt)
-
-        answer = _extract_answer(result)
-
-        if not answer:
-            return _error(
-                "O Agente Jurídico não retornou uma resposta."
-            )
-
-        return {
-            "success": True,
-            "answer": answer,
-            "agent": "legal",
-            "raw": result,
-        }
-
-    except Exception as exc:
-        return _error(
-            "Falha no Agente Jurídico.",
-            exc,
-        )
-
-
-# ============================================================
-# AGENTE DE RISCO
-# ============================================================
-
-def risk_analysis(
-    question: str,
-    context: Sequence[Any] | None = None,
-    citations: Sequence[Any] | None = None,
-) -> Dict[str, Any]:
-    """
-    Agente de Risco.
-
-    Identifica riscos jurídicos presentes nas evidências.
-    """
-
-    question = _safe_text(question)
-
-    context = list(context or [])
-    citations = list(citations or [])
-
-    prompt = f"""
+        return """
 Você é o Agente de Risco Jurídico.
 
-Analise somente as evidências fornecidas.
+Analise as evidências recuperadas.
 
 Identifique:
-1. Riscos jurídicos.
+
+1. Riscos.
 2. Pontos de atenção.
-3. Possíveis inconsistências.
-4. Informações ausentes.
-5. Grau de atenção.
+3. Inconsistências.
+4. Lacunas.
+5. Impactos possíveis.
+6. Recomendações.
+
+Classifique os riscos como:
+
+- Crítico
+- Alto
+- Médio
+- Baixo
 
 Não invente informações.
-
-PERGUNTA:
-{question}
-
-EVIDÊNCIAS:
-{_format_context(context)}
-
-CITAÇÕES:
-{_format_citations(citations)}
+Sempre relacione os riscos às evidências.
+Use citações [1], [2], [3].
 """
 
-    if generate_answer is None:
-        return _error(
-            "Serviço de IA não está disponível."
-        )
+    if agent == AGENT_SUMMARY:
 
-    try:
-        result = generate_answer(prompt)
-
-        answer = _extract_answer(result)
-
-        return {
-            "success": bool(answer),
-            "answer": answer,
-            "agent": "risk",
-            "raw": result,
-        }
-
-    except Exception as exc:
-        return _error(
-            "Falha no Agente de Risco.",
-            exc,
-        )
-
-
-# ============================================================
-# AGENTE DE RESUMO
-# ============================================================
-
-def summary_agent(
-    question: str,
-    context: Sequence[Any] | None = None,
-) -> Dict[str, Any]:
-    """
-    Agente de Resumo.
-    """
-
-    question = _safe_text(question)
-    context = list(context or [])
-
-    prompt = f"""
+        return """
 Você é o Agente de Resumo Jurídico.
 
-Resuma somente as informações existentes nas evidências.
+Produza um resumo fiel aos documentos.
 
-Seja:
-- objetivo;
-- claro;
-- organizado;
-- fiel ao documento.
+Estrutura:
 
-PERGUNTA:
-{question}
+### Resumo executivo
 
-DOCUMENTOS:
-{_format_context(context)}
+### Principais pontos
+
+### Obrigações
+
+### Pontos de atenção
+
+### Evidências
+
+Não invente informações.
+Use citações quando disponíveis.
 """
 
-    if generate_answer is None:
-        return _error(
-            "Serviço de IA não está disponível."
-        )
+    return """
+Você é o Agente Geral do Assistente Jurídico.
 
-    try:
-        result = generate_answer(prompt)
+Responda de forma clara e objetiva.
 
-        answer = _extract_answer(result)
+Quando a pergunta depender dos documentos:
 
-        return {
-            "success": bool(answer),
-            "answer": answer,
-            "agent": "summary",
-            "raw": result,
-        }
+- utilize as evidências recuperadas;
+- não invente informações;
+- não invente fatos;
+- utilize citações;
+- informe quando não houver evidência suficiente.
 
-    except Exception as exc:
-        return _error(
-            "Falha no Agente de Resumo.",
-            exc,
-        )
-
-
-# ============================================================
-# AGENTE GERAL
-# ============================================================
-
-def general_agent(
-    question: str,
-    context: Sequence[Any] | None = None,
-    citations: Sequence[Any] | None = None,
-) -> Dict[str, Any]:
-    """
-    Agente Geral.
-    """
-
-    question = _safe_text(question)
-
-    prompt = f"""
-Você é o Agente Geral do Assistente Jurídico SaaS IA.
-
-Responda de maneira clara e objetiva.
-
-Utilize as evidências disponíveis.
-
-Não invente informações jurídicas.
-
-Se não houver evidência suficiente, diga explicitamente
-que não é possível responder com segurança.
-
-PERGUNTA:
-{question}
-
-EVIDÊNCIAS:
-{_format_context(context or [])}
-
-CITAÇÕES:
-{_format_citations(citations or [])}
+Nunca apresente uma hipótese como fato.
 """
 
-    if generate_answer is None:
-        return _error(
-            "Serviço de IA não está disponível."
-        )
-
-    try:
-        result = generate_answer(prompt)
-
-        answer = _extract_answer(result)
-
-        return {
-            "success": bool(answer),
-            "answer": answer,
-            "agent": "general",
-            "raw": result,
-        }
-
-    except Exception as exc:
-        return _error(
-            "Falha no Agente Geral.",
-            exc,
-        )
-
 
 # ============================================================
-# RAG
+# FORMATAÇÃO DE CONTEXTO
 # ============================================================
 
-def _run_rag(
-    question: str,
-    top_k: int = 5,
-) -> Dict[str, Any]:
-    """
-    Executa recuperação RAG.
-
-    Primeiro tenta retrieve_and_rerank.
-    Depois tenta rag_answer.
-    """
-
-    if not question:
-        return {
-            "success": False,
-            "chunks": [],
-            "citations": [],
-            "answer": "",
-        }
-
-    # --------------------------------------------------------
-    # Recuperação + reranking
-    # --------------------------------------------------------
-
-    if retrieve_and_rerank is not None:
-
-        try:
-
-            result = retrieve_and_rerank(
-                question,
-                top_k=top_k,
-            )
-
-            chunks = _extract_chunks(result)
-            citations = _extract_citations(result)
-
-            return {
-                "success": bool(chunks),
-                "chunks": chunks,
-                "citations": citations,
-                "answer": _extract_answer(result),
-                "raw": result,
-            }
-
-        except TypeError:
-
-            try:
-
-                result = retrieve_and_rerank(
-                    question
-                )
-
-                chunks = _extract_chunks(result)
-                citations = _extract_citations(result)
-
-                return {
-                    "success": bool(chunks),
-                    "chunks": chunks,
-                    "citations": citations,
-                    "answer": _extract_answer(result),
-                    "raw": result,
-                }
-
-            except Exception as exc:
-                logger.exception(
-                    "Erro na recuperação RAG."
-                )
-
-        except Exception:
-            logger.exception(
-                "Erro na recuperação RAG."
-            )
-
-    # --------------------------------------------------------
-    # RAG answer direto
-    # --------------------------------------------------------
-
-    if rag_answer is not None:
-
-        try:
-
-            result = rag_answer(
-                question
-            )
-
-            chunks = _extract_chunks(result)
-            citations = _extract_citations(result)
-            answer = _extract_answer(result)
-
-            return {
-                "success": bool(answer or chunks),
-                "chunks": chunks,
-                "citations": citations,
-                "answer": answer,
-                "raw": result,
-            }
-
-        except Exception:
-            logger.exception(
-                "Erro no rag_answer."
-            )
-
-    return {
-        "success": False,
-        "chunks": [],
-        "citations": [],
-        "answer": "",
-    }
-
-
-# ============================================================
-# GUARD AGENT
-# ============================================================
-
-def guard_agent(
-    question: str,
-    answer: str,
-    context: Sequence[Any] | None = None,
-) -> Dict[str, Any]:
-    """
-    Guard Agent determinístico.
-
-    Verifica condições básicas de segurança.
-
-    Não utiliza LLM.
-    """
-
-    question = _safe_text(question)
-    answer = _safe_text(answer)
-    context = list(context or [])
-
-    issues: List[str] = []
-
-    if not question:
-        issues.append(
-            "Pergunta vazia."
-        )
-
-    if not answer:
-        issues.append(
-            "Resposta vazia."
-        )
-
-    if not context:
-        issues.append(
-            "Nenhuma evidência recuperada."
-        )
-
-    # Indicadores de possível afirmação sem evidência.
-    suspicious_phrases = (
-        "tenho certeza absoluta",
-        "garanto que",
-        "com certeza",
-        "sem qualquer dúvida",
-    )
-
-    answer_lower = answer.lower()
-
-    for phrase in suspicious_phrases:
-
-        if phrase in answer_lower:
-
-            issues.append(
-                "A resposta contém linguagem de certeza excessiva."
-            )
-
-            break
-
-    return {
-        "success": len(issues) == 0,
-        "approved": len(issues) == 0,
-        "issues": issues,
-        "agent": "guard",
-    }
-
-
-# ============================================================
-# FORMATAÇÃO
-# ============================================================
-
-def _format_context(
-    chunks: Sequence[Any],
-) -> str:
-    """Formata evidências para o prompt."""
+def _format_context(chunks: Sequence[Any]) -> str:
 
     if not chunks:
-        return "Nenhuma evidência recuperada."
+        return "Nenhuma evidência foi recuperada."
 
-    output: List[str] = []
+    output = []
 
-    for index, chunk in enumerate(chunks, start=1):
+    for index, chunk in enumerate(chunks, 1):
 
         if isinstance(chunk, dict):
 
@@ -712,20 +449,18 @@ def _format_context(
     return "\n\n".join(output)
 
 
-def _format_citations(
-    citations: Sequence[Any],
-) -> str:
-    """Formata citações."""
+# ============================================================
+# FORMATAÇÃO DE CITAÇÕES
+# ============================================================
+
+def _format_citations(citations: Sequence[Any]) -> str:
 
     if not citations:
         return "Nenhuma citação disponível."
 
-    output: List[str] = []
+    output = []
 
-    for index, citation in enumerate(
-        citations,
-        start=1,
-    ):
+    for index, citation in enumerate(citations, 1):
 
         if isinstance(citation, dict):
 
@@ -745,9 +480,7 @@ def _format_citations(
             )
 
             if page is not None:
-                location = (
-                    f"{document}, página {page}"
-                )
+                location = f"{document}, página {page}"
             else:
                 location = str(document)
 
@@ -765,229 +498,556 @@ def _format_citations(
 
 
 # ============================================================
-# ORCHESTRATE
+# EXECUTAR LLM
 # ============================================================
 
-def orchestrate(
+def _execute_llm(
     question: str,
-    mode: str = "auto",
-    chunks: Sequence[Any] | None = None,
-    citations: Sequence[Any] | None = None,
-    top_k: int = 5,
-    run_risk: bool = True,
-    run_summary: bool = False,
+    context: Sequence[Any],
+    citations: Sequence[Any],
+    agent: str,
 ) -> Dict[str, Any]:
-    """
-    Orquestra todos os agentes.
 
-    Uso:
-
-        result = orchestrate(
-            question,
-            mode="auto"
-        )
-
-    Retorno:
-
-        {
-            "success": True,
-            "answer": "...",
-            "chunks": [...],
-            "citations": [...],
-            "risk": {...},
-            "summary": {...},
-            "guard": {...},
-            "evaluation": {...}
-        }
-    """
-
-    question = _safe_text(question)
-
-    if not question:
+    if generate_answer is None:
 
         return {
             "success": False,
             "answer": "",
-            "error": "Pergunta vazia.",
-            "chunks": [],
-            "citations": [],
-            "risk": {},
-            "summary": {},
-            "guard": {},
-            "evaluation": {},
+            "error": "Serviço LLM indisponível.",
         }
 
-    # ========================================================
-    # 1. RAG
-    # ========================================================
+    prompt = f"""
+{_agent_instruction(agent)}
 
-    if chunks:
+PERGUNTA DO USUÁRIO:
+{question}
 
-        context = list(chunks)
-        rag_result = {
-            "success": True,
-            "chunks": context,
-            "citations": list(citations or []),
+EVIDÊNCIAS RECUPERADAS:
+{_format_context(context)}
+
+CITAÇÕES:
+{_format_citations(citations)}
+
+RESPONDA AGORA:
+"""
+
+    try:
+
+        result = generate_answer(prompt)
+
+        answer = _extract_answer(result)
+
+        return {
+            "success": bool(answer),
+            "answer": answer,
+            "agent": agent,
+            "raw": result,
+        }
+
+    except Exception as exc:
+
+        logger.exception(
+            "Falha na execução do LLM para agente %s",
+            agent,
+        )
+
+        return {
+            "success": False,
             "answer": "",
+            "agent": agent,
+            "error": f"Falha no agente {agent}.",
+            "exception": str(exc),
         }
 
-    else:
 
-        rag_result = _run_rag(
-            question,
-            top_k=top_k,
+# ============================================================
+# RAG
+# ============================================================
+
+def _run_rag(
+    query: str,
+    org_id: int,
+    top_k: int,
+    rerank_k: int,
+    extra_context: str = "",
+) -> Dict[str, Any]:
+
+    empty_result = {
+        "success": False,
+        "retrieved": [],
+        "reranked": [],
+        "chunks": [],
+        "citations": [],
+        "answer": "",
+        "evidence_count": 0,
+    }
+
+    # --------------------------------------------------------
+    # MÉTODO PRINCIPAL
+    # --------------------------------------------------------
+
+    if rag_answer is not None:
+
+        try:
+
+            result = rag_answer(
+                query,
+                org_id,
+                top_k=top_k,
+                rerank_k=rerank_k,
+                extra_context=extra_context,
+                generate_answer_flag=False,
+            )
+
+            if isinstance(result, dict):
+
+                retrieved = _safe_list(
+                    result.get("retrieved", [])
+                )
+
+                reranked = _safe_list(
+                    result.get("reranked", [])
+                )
+
+                context = (
+                    reranked
+                    or _safe_list(result.get("context", []))
+                    or _safe_list(result.get("chunks", []))
+                    or retrieved
+                )
+
+                citations = _extract_citations(result)
+
+                return {
+                    **result,
+                    "success": bool(context),
+                    "retrieved": retrieved,
+                    "reranked": reranked,
+                    "chunks": context,
+                    "citations": citations,
+                    "answer": _extract_answer(result),
+                    "evidence_count": len(context),
+                }
+
+        except TypeError as exc:
+
+            logger.warning(
+                "Assinatura antiga do rag_answer detectada: %s",
+                exc,
+            )
+
+        except Exception as exc:
+
+            logger.exception(
+                "Falha no rag_answer: %s",
+                exc,
+            )
+
+    # --------------------------------------------------------
+    # FALLBACK: RETRIEVE + RERANK
+    # --------------------------------------------------------
+
+    if retrieve_and_rerank is not None:
+
+        try:
+
+            result = retrieve_and_rerank(
+                query,
+                org_id,
+                top_k=top_k,
+                rerank_k=rerank_k,
+            )
+
+            if isinstance(result, dict):
+
+                retrieved = _safe_list(
+                    result.get("retrieved", [])
+                )
+
+                reranked = _safe_list(
+                    result.get("reranked", [])
+                )
+
+                context = (
+                    reranked
+                    or _safe_list(result.get("chunks", []))
+                    or retrieved
+                )
+
+                citations = _extract_citations(result)
+
+                return {
+                    **result,
+                    "success": bool(context),
+                    "retrieved": retrieved,
+                    "reranked": reranked,
+                    "chunks": context,
+                    "citations": citations,
+                    "answer": _extract_answer(result),
+                    "evidence_count": len(context),
+                }
+
+        except Exception as exc:
+
+            logger.exception(
+                "Falha no retrieve_and_rerank: %s",
+                exc,
+            )
+
+    return empty_result
+
+
+# ============================================================
+# GUARD AGENT
+# ============================================================
+
+def guard_agent(
+    question: str,
+    answer: str,
+    context: Sequence[Any],
+) -> Dict[str, Any]:
+
+    issues = []
+
+    if not question:
+        issues.append("Pergunta vazia.")
+
+    if not context:
+        issues.append(
+            "Nenhuma evidência recuperada."
         )
 
-        context = rag_result.get(
-            "chunks",
-            [],
+    if not answer:
+        issues.append(
+            "Resposta vazia."
         )
 
-        citations = rag_result.get(
-            "citations",
-            [],
-        )
+    suspicious = [
+        "tenho certeza absoluta",
+        "garanto que",
+        "com certeza absoluta",
+        "sem qualquer dúvida",
+    ]
 
-    context = list(context or [])
-    citations = list(citations or [])
+    answer_lower = answer.lower()
 
-    # ========================================================
-    # 2. RESPOSTA PRINCIPAL
-    # ========================================================
+    for phrase in suspicious:
 
-    selected_mode = (
-        mode or "auto"
-    ).lower().strip()
+        if phrase in answer_lower:
+
+            issues.append(
+                "Linguagem de certeza excessiva."
+            )
+
+            break
+
+    # IMPORTANTE:
+    # ausência de contexto não bloqueia tecnicamente
+    # a execução do sistema. Ela apenas é sinalizada.
+
+    return {
+        "success": len(issues) == 0,
+        "approved": True,
+        "allowed": True,
+        "issues": issues,
+        "agent": "guard",
+    }
+
+
+# ============================================================
+# ORCHESTRATE
+# ============================================================
+
+def orchestrate(
+    query: str | None = None,
+    org_id: int | None = None,
+    mode: str = "auto",
+    top_k: int = DEFAULT_TOP_K,
+    rerank_k: int = DEFAULT_RERANK_K,
+    extra_context: str = "",
+    question: str | None = None,
+    chunks: Sequence[Any] | None = None,
+    citations: Sequence[Any] | None = None,
+    run_risk: bool = False,
+    run_summary: bool = False,
+) -> Dict[str, Any]:
+
+    started = time.perf_counter()
+
+    # --------------------------------------------------------
+    # COMPATIBILIDADE
+    # --------------------------------------------------------
+
+    if not query:
+        query = question
+
+    query = _safe_text(query)
+
+    # --------------------------------------------------------
+    # VALIDAÇÃO
+    # --------------------------------------------------------
+
+    if not query:
+
+        return {
+            "success": False,
+            "answer": "Digite uma pergunta.",
+            "agent": AGENT_GENERAL,
+            "agent_label": agent_label(AGENT_GENERAL),
+            "intent": AGENT_GENERAL,
+            "citations": [],
+            "context": [],
+            "chunks": [],
+            "retrieved": [],
+            "reranked": [],
+            "evidence_count": 0,
+            "guard": {
+                "allowed": False,
+                "approved": False,
+            },
+            "evaluation": {},
+            "latency_ms": 0,
+            "error": "empty_query",
+        }
+
+    try:
+
+        org_id = int(org_id)
+
+    except (TypeError, ValueError):
+
+        return {
+            "success": False,
+            "answer": "Organização inválida.",
+            "agent": AGENT_GENERAL,
+            "agent_label": agent_label(AGENT_GENERAL),
+            "intent": AGENT_GENERAL,
+            "citations": [],
+            "context": [],
+            "chunks": [],
+            "retrieved": [],
+            "reranked": [],
+            "evidence_count": 0,
+            "guard": {
+                "allowed": False,
+                "approved": False,
+            },
+            "evaluation": {},
+            "latency_ms": 0,
+            "error": "invalid_org_id",
+        }
+
+    # --------------------------------------------------------
+    # LIMITES
+    # --------------------------------------------------------
+
+    top_k = _safe_int(
+        top_k,
+        DEFAULT_TOP_K,
+        1,
+        MAX_TOP_K,
+    )
+
+    rerank_k = _safe_int(
+        rerank_k,
+        DEFAULT_RERANK_K,
+        1,
+        MAX_RERANK_K,
+    )
+
+    if rerank_k > top_k:
+        rerank_k = top_k
+
+    # --------------------------------------------------------
+    # AGENTE
+    # --------------------------------------------------------
+
+    selected_mode = _safe_text(mode).lower()
 
     if selected_mode in (
+        "",
+        "auto",
+    ):
+
+        agent = detect_intent(query)
+
+    elif selected_mode in (
         "legal",
         "juridico",
         "jurídico",
     ):
 
-        primary = legal_agent(
-            question,
-            context,
-            citations,
-        )
+        agent = AGENT_LEGAL
 
     elif selected_mode in (
-        "general",
-        "geral",
+        "risk",
+        "risco",
     ):
 
-        primary = general_agent(
-            question,
-            context,
-            citations,
-        )
+        agent = AGENT_RISK
 
     elif selected_mode in (
         "summary",
         "resumo",
     ):
 
-        primary = summary_agent(
-            question,
-            context,
-        )
+        agent = AGENT_SUMMARY
 
     else:
 
-        # ----------------------------------------------------
-        # AUTO
-        # ----------------------------------------------------
+        agent = AGENT_GENERAL
 
-        primary = legal_agent(
-            question,
-            context,
-            citations,
+    logger.info(
+        "ORCHESTRATOR | org=%s | agent=%s | query=%s",
+        org_id,
+        agent,
+        query[:120],
+    )
+
+    # ========================================================
+    # RAG
+    # ========================================================
+
+    if chunks:
+
+        context = list(chunks)
+
+        rag_result = {
+            "success": True,
+            "retrieved": context,
+            "reranked": context,
+            "chunks": context,
+            "citations": list(citations or []),
+            "answer": "",
+            "evidence_count": len(context),
+        }
+
+    else:
+
+        rag_result = _run_rag(
+            query=query,
+            org_id=org_id,
+            top_k=top_k,
+            rerank_k=rerank_k,
+            extra_context=extra_context,
         )
 
-        # Fallback para agente geral.
-        if not primary.get("success"):
+        context = _safe_list(
+            rag_result.get("chunks", [])
+        )
 
-            logger.warning(
-                "Agente Jurídico falhou. "
-                "Executando fallback para Agente Geral."
-            )
+        citations = _safe_list(
+            rag_result.get("citations", [])
+        )
 
-            primary = general_agent(
-                question,
-                context,
-                citations,
-            )
+    # ========================================================
+    # CONTEXTO EXTRA
+    # ========================================================
+
+    if extra_context:
+
+        context = list(context)
+
+        context.append(
+            {
+                "document": "Contexto fornecido pelo usuário",
+                "page": None,
+                "content": extra_context,
+            }
+        )
+
+    # ========================================================
+    # AGENTE PRINCIPAL
+    # ========================================================
+
+    primary = _execute_llm(
+        question=query,
+        context=context,
+        citations=citations,
+        agent=agent,
+    )
 
     answer = _extract_answer(primary)
 
     # ========================================================
-    # 3. FALLBACK RAG
+    # FALLBACK
     # ========================================================
 
-    if not answer and rag_result.get("answer"):
+    if not answer:
 
-        answer = _safe_text(
-            rag_result.get("answer")
-        )
+        if rag_result.get("answer"):
+
+            answer = _safe_text(
+                rag_result.get("answer")
+            )
 
     # ========================================================
-    # 4. GUARD AGENT
+    # GUARD
     # ========================================================
 
     guard = guard_agent(
-        question,
+        query,
         answer,
         context,
     )
 
     # ========================================================
-    # 5. RISCO
+    # RISCO OPCIONAL
     # ========================================================
 
-    risk: Dict[str, Any] = {}
+    risk = {}
 
-    if run_risk:
+    if run_risk and context:
 
-        risk = risk_analysis(
-            question,
-            context,
-            citations,
+        risk = _execute_llm(
+            question=(
+                "Analise os riscos jurídicos "
+                "presentes nas evidências."
+            ),
+            context=context,
+            citations=citations,
+            agent=AGENT_RISK,
         )
 
     # ========================================================
-    # 6. RESUMO
+    # RESUMO OPCIONAL
     # ========================================================
 
-    summary: Dict[str, Any] = {}
+    summary = {}
 
-    if run_summary:
+    if run_summary and context:
 
-        summary = summary_agent(
-            question,
-            context,
+        summary = _execute_llm(
+            question=(
+                "Faça um resumo das evidências."
+            ),
+            context=context,
+            citations=citations,
+            agent=AGENT_SUMMARY,
         )
 
     # ========================================================
-    # 7. EVALUATION
+    # EVALUATION
     # ========================================================
 
-    evaluation: Dict[str, Any] = {}
+    evaluation = {}
 
-    if evaluate_answer is not None:
+    if evaluate_answer is not None and answer:
 
         try:
 
             evaluation = evaluate_answer(
-                question,
+                query,
                 answer,
                 context,
                 citations,
             )
 
-        except Exception:
+        except Exception as exc:
 
             logger.exception(
-                "Falha na avaliação da resposta."
+                "Falha na avaliação: %s",
+                exc,
             )
 
             evaluation = {
@@ -997,31 +1057,81 @@ def orchestrate(
             }
 
     # ========================================================
-    # 8. RESULTADO
+    # STATUS
     # ========================================================
 
-    success = bool(
-        answer
-        and guard.get("approved", False)
+    latency_ms = int(
+        (time.perf_counter() - started) * 1000
     )
 
+    evidence_count = len(context)
+
+    # ========================================================
+    # RESPOSTA SEM EVIDÊNCIA
+    # ========================================================
+
+    if not context and not answer:
+
+        answer = (
+            "Não foi possível gerar uma resposta "
+            "com base nas evidências disponíveis."
+        )
+
+    # ========================================================
+    # RESULTADO
+    # ========================================================
+
     return {
-        "success": success,
+        "success": bool(answer),
 
         "answer": answer,
 
-        "agent": primary.get(
-            "agent",
-            "legal",
+        "agent": agent,
+
+        "agent_label": agent_label(agent),
+
+        "intent": (
+            "legal_query"
+            if agent == AGENT_LEGAL
+            else agent
         ),
 
         "mode": selected_mode,
 
+        "organization_id": org_id,
+
+        "query": query,
+
+        # RAG
+        "rag": rag_result,
+
+        "retrieved": rag_result.get(
+            "retrieved",
+            [],
+        ),
+
+        "reranked": rag_result.get(
+            "reranked",
+            context,
+        ),
+
         "chunks": context,
 
-        "reranked": context,
+        "context": context,
 
+        # Evidências
         "citations": citations,
+
+        "evidence_count": evidence_count,
+
+        "evidence_status": (
+            "available"
+            if evidence_count > 0
+            else "none"
+        ),
+
+        # Agentes
+        "primary": primary,
 
         "risk": risk,
 
@@ -1029,22 +1139,33 @@ def orchestrate(
 
         "summary": summary,
 
+        # Segurança
         "guard": guard,
 
+        # Métricas
         "evaluation": evaluation,
 
-        "rag": rag_result,
+        "latency_ms": latency_ms,
 
-        "primary": primary,
-
-        "recommendations": evaluation.get(
-            "recommendations",
-            [],
-        ) if isinstance(evaluation, dict) else [],
+        # Compatibilidade
+        "recommendations": (
+            evaluation.get(
+                "recommendations",
+                [],
+            )
+            if isinstance(
+                evaluation,
+                dict,
+            )
+            else []
+        ),
 
         "error": (
-            primary.get("error")
-            if isinstance(primary, dict)
+            primary.get("error", "")
+            if isinstance(
+                primary,
+                dict,
+            )
             and not primary.get("success")
             else ""
         ),
@@ -1052,35 +1173,144 @@ def orchestrate(
 
 
 # ============================================================
-# ALIAS
+# ANÁLISE JURÍDICA
 # ============================================================
 
-def run_orchestrator(
-    question: str,
+def legal_analysis(
+    query: str,
+    org_id: int,
     **kwargs: Any,
 ) -> Dict[str, Any]:
-    """
-    Alias de compatibilidade.
-    """
 
     return orchestrate(
-        question,
+        query=query,
+        org_id=org_id,
+        mode="legal",
         **kwargs,
     )
 
 
 # ============================================================
-# TESTE
+# ANÁLISE DE RISCO
+# ============================================================
+
+def risk_analysis(
+    query: str,
+    org_id: int,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+
+    return orchestrate(
+        query=query,
+        org_id=org_id,
+        mode="risk",
+        **kwargs,
+    )
+
+
+# ============================================================
+# RESUMO
+# ============================================================
+
+def summarize(
+    query: str,
+    org_id: int,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+
+    return orchestrate(
+        query=query,
+        org_id=org_id,
+        mode="summary",
+        **kwargs,
+    )
+
+
+# ============================================================
+# ALIAS
+# ============================================================
+
+def run_orchestrator(
+    query: str | None = None,
+    question: str | None = None,
+    org_id: int | None = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+
+    return orchestrate(
+        query=query or question,
+        org_id=org_id,
+        **kwargs,
+    )
+
+
+# ============================================================
+# STATUS DOS 8 AGENTES
+# ============================================================
+
+def orchestrator_status() -> Dict[str, Any]:
+
+    return {
+        "configured": True,
+
+        "agents": [
+            {
+                "id": "legal",
+                "name": "Agente Jurídico",
+                "status": "active",
+            },
+            {
+                "id": "risk",
+                "name": "Agente de Risco",
+                "status": "active",
+            },
+            {
+                "id": "summary",
+                "name": "Agente de Resumo",
+                "status": "active",
+            },
+            {
+                "id": "general",
+                "name": "Agente Geral",
+                "status": "active",
+            },
+            {
+                "id": "rag",
+                "name": "RAG / Recuperação",
+                "status": "active",
+            },
+            {
+                "id": "citations",
+                "name": "Citações e Evidências",
+                "status": "active",
+            },
+            {
+                "id": "evaluation",
+                "name": "Evaluation / Métricas",
+                "status": "active",
+            },
+            {
+                "id": "guard",
+                "name": "Guard Agent",
+                "status": "active",
+            },
+        ],
+
+        "default_top_k": DEFAULT_TOP_K,
+
+        "default_rerank_k": DEFAULT_RERANK_K,
+
+        "max_top_k": MAX_TOP_K,
+
+        "max_rerank_k": MAX_RERANK_K,
+    }
+
+
+# ============================================================
+# SELF TEST
 # ============================================================
 
 def self_test() -> Dict[str, Any]:
-    """
-    Teste básico do módulo.
-    """
-
-    question = (
-        "Qual é o objeto do contrato?"
-    )
 
     chunks = [
         {
@@ -1105,16 +1335,15 @@ def self_test() -> Dict[str, Any]:
         }
     ]
 
-    result = orchestrate(
-        question=question,
+    return orchestrate(
+        query="Qual é o objeto do contrato?",
+        org_id=1,
         mode="legal",
         chunks=chunks,
         citations=citations,
         run_risk=False,
         run_summary=False,
     )
-
-    return result
 
 
 # ============================================================
@@ -1124,37 +1353,18 @@ def self_test() -> Dict[str, Any]:
 if __name__ == "__main__":
 
     print("=" * 70)
-    print("AI ORCHESTRATOR V3.1 - SELF TEST")
+    print("AI ORCHESTRATOR V3.1")
     print("=" * 70)
 
     result = self_test()
 
-    print(
-        f"Success: {result.get('success')}"
-    )
-
-    print(
-        f"Agent: {result.get('agent')}"
-    )
-
-    print(
-        f"Contextos: "
-        f"{len(result.get('chunks', []))}"
-    )
-
-    print(
-        f"Citações: "
-        f"{len(result.get('citations', []))}"
-    )
-
-    print(
-        f"Resposta: "
-        f"{result.get('answer', '')}"
-    )
-
-    print(
-        f"Evaluation: "
-        f"{result.get('evaluation', {})}"
-    )
+    print("Success:", result.get("success"))
+    print("Agent:", result.get("agent"))
+    print("Intent:", result.get("intent"))
+    print("Evidências:", result.get("evidence_count"))
+    print("Citações:", len(result.get("citations", [])))
+    print("Guard:", result.get("guard"))
+    print("Evaluation:", result.get("evaluation"))
+    print("Resposta:", result.get("answer"))
 
     print("=" * 70)

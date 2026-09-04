@@ -39,20 +39,35 @@ st.set_page_config(
 
 
 # ============================================================
-# BANCO
+# BANCO DE DADOS
 # ============================================================
 
 try:
     init_db()
-    seed_demo()
-
 except Exception as exc:
-    st.error(f"Erro ao inicializar o banco: {exc}")
+    st.error("Erro ao inicializar o banco de dados.")
 
-    with st.expander("Detalhes técnicos"):
-        st.code(traceback.format_exc())
+    with st.expander("Detalhes do erro"):
+        st.code(
+            f"{type(exc).__name__}: {exc}\n\n"
+            f"{traceback.format_exc()}"
+        )
 
     st.stop()
+
+try:
+    seed_demo()
+except Exception as exc:
+    st.warning(
+        "O banco foi inicializado, mas os dados de demonstração "
+        "não puderam ser carregados."
+    )
+
+    with st.expander("Detalhes do seed"):
+        st.code(
+            f"{type(exc).__name__}: {exc}\n\n"
+            f"{traceback.format_exc()}"
+        )
 
 
 # ============================================================

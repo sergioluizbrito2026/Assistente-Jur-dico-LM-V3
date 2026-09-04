@@ -1,178 +1,561 @@
+"""
+Assistente Jurídico SaaS IA V3.2
+services/ai.py
+
+AI Service central da plataforma.
+
+Responsabilidades:
+
+- Gerenciar provedores LLM
+- Gemini
+- OpenAI
+- Modo demonstração
+- Prompt jurídico central
+- Agentes especializados
+- Compatibilidade com RAG
+- Compatibilidade com AI Orchestrator
+- Metadados de execução
+- Latência
+- Status do provedor
+- Tratamento de erros
+- Controle de temperatura
+- Controle de tokens
+- Cache dos clientes LLM
+
+Agentes suportados:
+
+1. Agente Jurídico
+2. Agente de Risco
+3. Agente de Resumo
+4. Agente Geral
+
+Compatibilidade:
+
+    generate_answer(query, chunks)
+
+    generate_answer(
+        query,
+        chunks,
+        agent_instruction="..."
+    )
+
+Também aceita:
+
+    generate_answer(prompt)
+
+quando chamado diretamente pelo orchestrator.
+"""
+
+from __future__ import annotations
+
 from functools import lru_cache
+import logging
 import os
 import time
-from typing import Any
+from typing import Any, Dict, List, Sequence
+
+
+# ============================================================
+# LOG
+# ============================================================
+
+logger = logging.getLogger(__name__)
+
+if not logger.handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format=(
+            "%(asctime)s | "
+            "%(levelname)s | "
+            "%(name)s | "
+            "%(message)s"
+        ),
+    )
+
+
+# ============================================================
+# AGENTES
+# ============================================================
+
+AGENT_LEGAL = "legal"
+AGENT_RISK = "risk"
+AGENT_SUMMARY = "summary"
+AGENT_GENERAL = "general"
+
+
+AGENT_LABELS = {
+    AGENT_LEGAL: "Agente Jurídico",
+    AGENT_RISK: "Agente de Risco",
+    AGENT_SUMMARY: "Agente de Resumo",
+    AGENT_GENERAL: "Agente Geral",
+}
+
+
+# ============================================================
+# SYSTEM PROMPT
+# ============================================================
+
+SYSTEM_PROMPT = """
+Você é o Assistente Jurídico de uma plataforma profissional
+de análise documental com Inteligência Artificial.
+
+Sua função é auxiliar profissionais do Direito na análise de
+documentos, contratos, processos e evidências documentais.
+
+REGRAS FUNDAMENTAIS:
+
+1. Quando a pergunta depender de documentos, utilize
+   prioritariamente as evidências fornecidas no contexto.
+
+2. Nunca invente fatos.
+
+3. Nunca invente:
+   - artigos de lei;
+   - jurisprudência;
+   - precedentes;
+   - números de processo;
+   - datas;
+   - valores;
+   - cláusulas;
+   - nomes;
+   - decisões;
+   - informações documentais.
+
+4. Se não houver evidência suficiente, informe claramente:
+
+"Não há evidência suficiente nos documentos disponibilizados."
+
+5. Diferencie claramente:
+
+   FATO
+   INTERPRETAÇÃO
+   RISCO
+   RECOMENDAÇÃO
+
+6. Nunca apresente interpretação como fato.
+
+7. Utilize referências [1], [2], [3] etc. somente quando
+   elas existirem no contexto fornecido.
+
+8. Nunca crie uma referência inexistente.
+
+9. Se houver informações conflitantes entre documentos,
+   informe explicitamente o conflito.
+
+10. Não trate a resposta como decisão jurídica definitiva.
+
+11. Seja objetivo, profissional, estruturado e auditável.
+
+12. Não utilize conhecimento externo para preencher lacunas
+    documentais, salvo quando isso for explicitamente solicitado.
+
+13. Priorize precisão e fidelidade às evidências.
+
+14. Se a evidência não permitir concluir algo, diga isso
+    explicitamente.
+
+15. Nunca transforme uma possibilidade em certeza.
+
+16. Não utilize linguagem de certeza absoluta quando a
+    documentação não sustentar essa conclusão.
+
+17. Sempre que possível, indique a origem da informação.
+
+18. A resposta deve ser útil para análise profissional,
+    mas não substitui a avaliação de um advogado.
+"""
 
 
 # ============================================================
 # CONFIGURAÇÃO
 # ============================================================
 
-SYSTEM_PROMPT = """
-Você é um Assistente Jurídico de apoio à análise documental.
+def _get_provider() -> str:
+    """
+    Retorna o provedor configurado.
 
-REGRAS FUNDAMENTAIS:
+    Valores suportados:
 
-1. Quando a pergunta depender de documentos, utilize somente as
-   evidências fornecidas no contexto.
+        demo
+        gemini
+        openai
+    """
 
-2. Nunca invente fatos, artigos de lei, jurisprudência, precedentes,
-   números de processo, datas, valores ou informações que não estejam
-   nas evidências.
-
-3. Se não houver evidência suficiente, informe explicitamente:
-   "Não há evidência suficiente nos documentos disponibilizados."
-
-4. Diferencie claramente:
-   - Fato encontrado no documento
-   - Interpretação
-   - Risco
-   - Recomendação
-
-5. Não apresente interpretação como fato.
-
-6. Utilize [1], [2], [3] etc. para indicar as fontes utilizadas.
-
-7. Não crie referências ou citações que não existam no contexto.
-
-8. Se as fontes apresentarem informações conflitantes, informe
-   explicitamente a existência do conflito.
-
-9. Não trate a resposta como decisão jurídica definitiva.
-
-10. Seja objetivo, estruturado, profissional e auditável.
-
-11. Não utilize conhecimento externo para preencher lacunas documentais,
-    salvo quando isso for explicitamente solicitado.
-
-12. Priorize precisão e fidelidade às evidências em vez de especulação.
-"""
-
-
-# ============================================================
-# CONFIGURAÇÕES DO SISTEMA
-# ============================================================
-
-def _get_provider():
     return os.getenv(
         "LLM_PROVIDER",
         "demo",
     ).strip().lower()
 
 
-def _get_model(provider=None):
+def _get_model(provider: str | None = None) -> str:
 
     provider = provider or _get_provider()
 
     if provider == "gemini":
+
         return os.getenv(
             "GEMINI_MODEL",
             "gemini-2.5-flash",
-        )
+        ).strip()
 
     if provider == "openai":
+
         return os.getenv(
             "OPENAI_MODEL",
             "gpt-5-mini",
-        )
+        ).strip()
 
     return "demo"
 
 
-def _get_temperature():
+def _get_temperature() -> float:
+
     try:
-        return float(
+
+        value = float(
             os.getenv(
                 "LLM_TEMPERATURE",
                 "0.2",
             )
         )
-    except (TypeError, ValueError):
+
+        return max(
+            0.0,
+            min(value, 1.0),
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+
         return 0.2
 
 
-def _get_max_tokens():
+def _get_max_tokens() -> int:
 
     try:
-        return int(
+
+        value = int(
             os.getenv(
                 "LLM_MAX_TOKENS",
                 "2048",
             )
         )
 
-    except (TypeError, ValueError):
+        return max(
+            256,
+            min(value, 16384),
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+
         return 2048
 
 
-def _get_timeout():
+def _get_timeout() -> float:
 
     try:
-        return float(
+
+        value = float(
             os.getenv(
                 "LLM_TIMEOUT",
                 "60",
             )
         )
 
-    except (TypeError, ValueError):
+        return max(
+            5.0,
+            min(value, 300.0),
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+
         return 60.0
+
+
+# ============================================================
+# UTILITÁRIOS
+# ============================================================
+
+def _safe_text(value: Any) -> str:
+
+    if value is None:
+        return ""
+
+    if isinstance(value, str):
+        return value.strip()
+
+    try:
+        return str(value).strip()
+
+    except Exception:
+        return ""
+
+
+def _safe_chunks(
+    chunks: Any,
+) -> List[Any]:
+
+    if chunks is None:
+        return []
+
+    if isinstance(chunks, list):
+        return chunks
+
+    if isinstance(chunks, tuple):
+        return list(chunks)
+
+    if isinstance(chunks, Sequence) and not isinstance(
+        chunks,
+        (str, bytes),
+    ):
+        return list(chunks)
+
+    return [chunks]
 
 
 # ============================================================
 # CONTEXTO
 # ============================================================
 
-def _context(chunks):
+def _context(
+    chunks: Sequence[Any] | None,
+) -> str:
     """
-    Constrói o contexto utilizado pelo LLM.
+    Constrói o contexto documental.
 
-    As referências [1], [2], [3] correspondem à ordem
-    dos chunks enviados.
+    As referências [1], [2], [3] correspondem
+    exatamente à ordem dos chunks.
     """
+
+    chunks = _safe_chunks(chunks)
 
     if not chunks:
-        return "Nenhuma evidência documental foi recuperada."
 
-    parts = []
+        return (
+            "Nenhuma evidência documental "
+            "foi recuperada."
+        )
 
-    for i, chunk in enumerate(
+    parts: List[str] = []
+
+    for index, chunk in enumerate(
         chunks,
         1,
     ):
 
-        document = chunk.get(
-            "document",
-            "Desconhecido",
-        )
+        if isinstance(
+            chunk,
+            dict,
+        ):
 
-        page = chunk.get(
-            "page",
-            "N/D",
-        )
-
-        chunk_id = chunk.get(
-            "chunk_id",
-            "N/D",
-        )
-
-        content = (
-            chunk.get(
-                "content",
-                "",
+            document = (
+                chunk.get("document")
+                or chunk.get("document_name")
+                or chunk.get("name")
+                or "Documento desconhecido"
             )
-            or ""
-        ).strip()
+
+            page = (
+                chunk.get("page")
+                if chunk.get("page") is not None
+                else "N/D"
+            )
+
+            chunk_id = (
+                chunk.get("chunk_id")
+                or chunk.get("id")
+                or "N/D"
+            )
+
+            content = (
+                chunk.get("content")
+                or chunk.get("text")
+                or chunk.get("page_content")
+                or chunk.get("chunk")
+                or ""
+            )
+
+        else:
+
+            document = "Documento"
+
+            page = "N/D"
+
+            chunk_id = "N/D"
+
+            content = _safe_text(
+                chunk
+            )
+
+        content = _safe_text(
+            content
+        )
+
+        if not content:
+            continue
 
         parts.append(
-            f"[{i}] "
+            f"[{index}] "
             f"DOCUMENTO: {document} | "
             f"PÁGINA: {page} | "
             f"CHUNK: {chunk_id}\n"
             f"{content}"
         )
 
+    if not parts:
+
+        return (
+            "Nenhuma evidência documental "
+            "válida foi recuperada."
+        )
+
     return "\n\n".join(parts)
+
+
+# ============================================================
+# INSTRUÇÕES DOS AGENTES
+# ============================================================
+
+def legal_agent_instruction() -> str:
+
+    return """
+Você está atuando como AGENTE JURÍDICO.
+
+Objetivo:
+
+Realizar análise jurídica documental baseada nas evidências
+fornecidas.
+
+Estruture a resposta, quando aplicável, em:
+
+### Fato identificado
+### Análise
+### Base documental
+### Pontos relevantes
+### Conclusão
+
+Regras:
+
+- Não invente legislação.
+- Não invente jurisprudência.
+- Não invente fatos.
+- Diferencie fato de interpretação.
+- Utilize citações [N].
+- Se não houver evidência suficiente, informe isso.
+"""
+
+
+def risk_agent_instruction() -> str:
+
+    return """
+Você está atuando como AGENTE DE RISCO JURÍDICO.
+
+Objetivo:
+
+Identificar riscos, inconsistências, lacunas e pontos críticos
+presentes nas evidências.
+
+Classifique cada risco, quando possível, como:
+
+- CRÍTICO
+- ALTO
+- MÉDIO
+- BAIXO
+
+Estruture a resposta em:
+
+### Riscos identificados
+### Pontos críticos
+### Inconsistências
+### Lacunas
+### Impactos possíveis
+### Recomendações
+### Evidências
+
+Cada risco deve estar relacionado a uma evidência.
+
+Não invente informações.
+Utilize [N] para as fontes.
+"""
+
+
+def summary_agent_instruction() -> str:
+
+    return """
+Você está atuando como AGENTE DE RESUMO JURÍDICO.
+
+Produza um resumo fiel e objetivo das evidências.
+
+Estruture em:
+
+### Resumo executivo
+
+### Principais pontos
+
+### Obrigações
+
+### Prazos
+
+### Valores
+
+### Pontos de atenção
+
+### Evidências
+
+Ignore seções que não tenham informações suficientes.
+
+Não invente informações.
+Utilize [N] quando houver evidência correspondente.
+"""
+
+
+def general_agent_instruction() -> str:
+
+    return """
+Você está atuando como AGENTE GERAL.
+
+Responda de maneira clara, profissional e objetiva.
+
+Quando a pergunta depender dos documentos:
+
+- utilize as evidências;
+- cite as fontes;
+- não invente informações;
+- informe quando houver insuficiência de evidências;
+- diferencie fato de interpretação.
+
+Quando a pergunta não depender dos documentos,
+responda normalmente, deixando claro quando estiver
+utilizando conhecimento geral.
+"""
+
+
+def get_agent_instruction(
+    agent: str | None,
+) -> str:
+
+    agent = _safe_text(
+        agent
+    ).lower()
+
+    if agent == AGENT_LEGAL:
+        return legal_agent_instruction()
+
+    if agent == AGENT_RISK:
+        return risk_agent_instruction()
+
+    if agent == AGENT_SUMMARY:
+        return summary_agent_instruction()
+
+    return general_agent_instruction()
 
 
 # ============================================================
@@ -180,63 +563,65 @@ def _context(chunks):
 # ============================================================
 
 def build_prompt(
-    query,
-    chunks,
-    system_prompt=None,
-    agent_instruction=None,
-):
+    query: str,
+    chunks: Sequence[Any] | None = None,
+    system_prompt: str | None = None,
+    agent_instruction: str | None = None,
+) -> str:
     """
-    Constrói o prompt final.
-
-    agent_instruction permite que futuros agentes especializados
-    utilizem o mesmo AI Service.
-
-    Exemplo:
-
-        Legal Agent
-        Risk Agent
-        Summary Agent
+    Constrói o prompt final enviado ao LLM.
     """
+
+    query = _safe_text(
+        query
+    )
 
     base_system = (
         system_prompt
         or SYSTEM_PROMPT
     )
 
-    context = _context(chunks)
+    context = _context(
+        chunks
+    )
 
-    prompt_parts = [
+    parts = [
         base_system,
+        "",
     ]
 
     if agent_instruction:
 
-        prompt_parts.extend(
+        parts.extend(
             [
+                "INSTRUÇÃO DO AGENTE:",
+                agent_instruction.strip(),
                 "",
-                "INSTRUÇÃO ESPECIALIZADA DO AGENTE:",
-                agent_instruction,
             ]
         )
 
-    prompt_parts.extend(
+    parts.extend(
         [
-            "",
             "CONTEXTO / EVIDÊNCIAS:",
             context,
             "",
             "PERGUNTA DO USUÁRIO:",
             query,
             "",
-            "IMPORTANTE:",
-            "Baseie as afirmações factuais nas evidências.",
-            "Utilize as referências [N] quando aplicável.",
-            "Não invente informações ausentes.",
+            "REGRAS DE RESPOSTA:",
+            "- Baseie fatos nas evidências.",
+            "- Não invente informações.",
+            "- Utilize [N] para evidências.",
+            "- Informe conflitos documentais.",
+            "- Informe insuficiência de evidência.",
+            "- Diferencie fato de interpretação.",
+            "",
+            "RESPONDA AGORA:",
         ]
     )
 
     return "\n".join(
-        prompt_parts
+        parts
     )
 
 
@@ -244,7 +629,9 @@ def build_prompt(
 # CLIENTE GEMINI
 # ============================================================
 
-@lru_cache(maxsize=1)
+@lru_cache(
+    maxsize=1
+)
 def _get_gemini_client():
 
     api_key = os.getenv(
@@ -262,7 +649,13 @@ def _get_gemini_client():
             api_key=api_key
         )
 
-    except Exception:
+    except Exception as exc:
+
+        logger.exception(
+            "Erro ao inicializar Gemini: %s",
+            exc,
+        )
+
         return None
 
 
@@ -270,7 +663,9 @@ def _get_gemini_client():
 # CLIENTE OPENAI
 # ============================================================
 
-@lru_cache(maxsize=1)
+@lru_cache(
+    maxsize=1
+)
 def _get_openai_client():
 
     api_key = os.getenv(
@@ -289,7 +684,13 @@ def _get_openai_client():
             timeout=_get_timeout(),
         )
 
-    except Exception:
+    except Exception as exc:
+
+        logger.exception(
+            "Erro ao inicializar OpenAI: %s",
+            exc,
+        )
+
         return None
 
 
@@ -298,11 +699,8 @@ def _get_openai_client():
 # ============================================================
 
 def _generate_gemini(
-    query,
-    chunks,
-    system_prompt=None,
-    agent_instruction=None,
-):
+    prompt: str,
+) -> str:
 
     client = _get_gemini_client()
 
@@ -314,13 +712,6 @@ def _generate_gemini(
 
     model = _get_model(
         "gemini"
-    )
-
-    prompt = build_prompt(
-        query=query,
-        chunks=chunks,
-        system_prompt=system_prompt,
-        agent_instruction=agent_instruction,
     )
 
     response = client.models.generate_content(
@@ -340,7 +731,9 @@ def _generate_gemini(
             "O Gemini não retornou conteúdo."
         )
 
-    return text.strip()
+    return _safe_text(
+        text
+    )
 
 
 # ============================================================
@@ -348,11 +741,8 @@ def _generate_gemini(
 # ============================================================
 
 def _generate_openai(
-    query,
-    chunks,
-    system_prompt=None,
-    agent_instruction=None,
-):
+    prompt: str,
+) -> str:
 
     client = _get_openai_client()
 
@@ -366,25 +756,13 @@ def _generate_openai(
         "openai"
     )
 
-    base_system = (
-        system_prompt
-        or SYSTEM_PROMPT
-    )
-
-    prompt = build_prompt(
-        query=query,
-        chunks=chunks,
-        system_prompt="",
-        agent_instruction=agent_instruction,
-    )
-
     response = client.chat.completions.create(
         model=model,
 
         messages=[
             {
                 "role": "system",
-                "content": base_system,
+                "content": SYSTEM_PROMPT,
             },
             {
                 "role": "user",
@@ -397,10 +775,18 @@ def _generate_openai(
         max_tokens=_get_max_tokens(),
     )
 
-    content = (
-        response.choices[0]
-        .message
-        .content
+    if not response.choices:
+
+        raise RuntimeError(
+            "A OpenAI não retornou escolhas."
+        )
+
+    message = response.choices[0].message
+
+    content = getattr(
+        message,
+        "content",
+        None,
     )
 
     if not content:
@@ -409,24 +795,34 @@ def _generate_openai(
             "A OpenAI não retornou conteúdo."
         )
 
-    return content.strip()
+    return _safe_text(
+        content
+    )
 
 
 # ============================================================
-# MODO DEMONSTRAÇÃO
+# MODO DEMO
 # ============================================================
 
-def _demo_response():
+def _demo_response(
+    query: str = "",
+    agent: str = AGENT_GENERAL,
+) -> str:
 
-    return """
+    label = AGENT_LABELS.get(
+        agent,
+        "Agente Geral",
+    )
+
+    return f"""
 ### 🤖 Modo demonstração
 
-O pipeline **Retriever → Reranker → AI Service**
-foi executado corretamente.
+**Agente:** {label}
 
-Nenhum provedor de LLM está configurado neste ambiente.
+O pipeline de Inteligência Artificial foi executado,
+mas nenhum provedor LLM está configurado neste ambiente.
 
-Para ativar a geração de respostas, configure:
+Configure um dos provedores:
 
 `LLM_PROVIDER=gemini`
 
@@ -442,9 +838,36 @@ e:
 
 `OPENAI_API_KEY`
 
-As evidências recuperadas e as citações continuam
-disponíveis para inspeção.
+O RAG, as evidências, as citações e as métricas
+continuam disponíveis para inspeção.
+
+**Pergunta recebida:**
+
+{query}
 """.strip()
+
+
+# ============================================================
+# NORMALIZAÇÃO DE ARGUMENTOS
+# ============================================================
+
+def _prepare_request(
+    query: Any,
+    chunks: Any = None,
+) -> tuple[str, List[Any]]:
+
+    query_text = _safe_text(
+        query
+    )
+
+    normalized_chunks = _safe_chunks(
+        chunks
+    )
+
+    return (
+        query_text,
+        normalized_chunks,
+    )
 
 
 # ============================================================
@@ -453,39 +876,104 @@ disponíveis para inspeção.
 
 def generate_answer(
     query,
-    chunks,
+    chunks=None,
     system_prompt=None,
     agent_instruction=None,
 ):
     """
-    Interface principal utilizada pelo RAG.
+    Interface principal do AI Service.
 
-    Mantém compatibilidade:
+    Compatibilidade:
 
         generate_answer(query, chunks)
 
-    E permite futuramente:
+    ou:
 
         generate_answer(
             query,
             chunks,
             agent_instruction="..."
         )
+
+    Também suporta:
+
+        generate_answer(prompt)
+
+    quando o orchestrator envia um prompt completo.
     """
 
-    query = (
-        query or ""
-    ).strip()
+    query_text, chunks_list = _prepare_request(
+        query,
+        chunks,
+    )
 
-    if not query:
+    if not query_text:
 
         return (
             "Não foi fornecida uma pergunta."
         )
 
-    chunks = chunks or []
-
     provider = _get_provider()
+
+    # --------------------------------------------------------
+    # AGENTE
+    # --------------------------------------------------------
+
+    agent = AGENT_GENERAL
+
+    if agent_instruction:
+
+        instruction_text = _safe_text(
+            agent_instruction
+        ).lower()
+
+        if "agente jurídico" in instruction_text:
+            agent = AGENT_LEGAL
+
+        elif "agente de risco" in instruction_text:
+            agent = AGENT_RISK
+
+        elif "agente de resumo" in instruction_text:
+            agent = AGENT_SUMMARY
+
+    # --------------------------------------------------------
+    # PROMPT
+    # --------------------------------------------------------
+
+    # Se chunks foram fornecidos, constrói o prompt normalmente.
+    #
+    # Se não foram fornecidos, consideramos que o argumento
+    # pode ser um prompt completo enviado pelo orchestrator.
+
+    if chunks_list:
+
+        prompt = build_prompt(
+            query=query_text,
+            chunks=chunks_list,
+            system_prompt=system_prompt,
+            agent_instruction=agent_instruction,
+        )
+
+    else:
+
+        if agent_instruction:
+
+            prompt = build_prompt(
+                query=query_text,
+                chunks=[],
+                system_prompt=system_prompt,
+                agent_instruction=agent_instruction,
+            )
+
+        else:
+
+            # Compatibilidade com:
+            #
+            # generate_answer(prompt)
+            #
+            # usado pelo ai_orchestrator.
+
+            prompt = query_text
 
     # --------------------------------------------------------
     # DEMO
@@ -493,7 +981,10 @@ def generate_answer(
 
     if provider == "demo":
 
-        return _demo_response()
+        return _demo_response(
+            query=query_text,
+            agent=agent,
+        )
 
     # --------------------------------------------------------
     # GEMINI
@@ -502,10 +993,7 @@ def generate_answer(
     if provider == "gemini":
 
         return _generate_gemini(
-            query=query,
-            chunks=chunks,
-            system_prompt=system_prompt,
-            agent_instruction=agent_instruction,
+            prompt
         )
 
     # --------------------------------------------------------
@@ -515,14 +1003,11 @@ def generate_answer(
     if provider == "openai":
 
         return _generate_openai(
-            query=query,
-            chunks=chunks,
-            system_prompt=system_prompt,
-            agent_instruction=agent_instruction,
+            prompt
         )
 
     # --------------------------------------------------------
-    # PROVIDER DESCONHECIDO
+    # PROVIDER INVÁLIDO
     # --------------------------------------------------------
 
     raise RuntimeError(
@@ -531,24 +1016,26 @@ def generate_answer(
 
 
 # ============================================================
-# GERAÇÃO COM METADADOS
+# RESULTADO ESTRUTURADO
 # ============================================================
 
 def generate_answer_result(
     query,
-    chunks,
+    chunks=None,
     system_prompt=None,
     agent_instruction=None,
-):
+) -> Dict[str, Any]:
     """
-    Versão estruturada do AI Service.
+    Executa a IA retornando metadados.
 
     Útil para:
-        - auditoria;
-        - métricas;
-        - dashboard;
-        - agentes;
-        - monitoramento.
+
+    - Dashboard
+    - Auditoria
+    - Métricas
+    - Monitoramento
+    - Agentes
+    - Observabilidade
     """
 
     provider = _get_provider()
@@ -577,11 +1064,22 @@ def generate_answer_result(
         )
 
         return {
-            "success": True,
-            "answer": answer,
+            "success": bool(answer),
+
+            "answer": _safe_text(
+                answer
+            ),
+
             "provider": provider,
+
             "model": model,
+
             "latency_ms": latency_ms,
+
+            "temperature": _get_temperature(),
+
+            "max_tokens": _get_max_tokens(),
+
             "error": None,
         }
 
@@ -595,28 +1093,147 @@ def generate_answer_result(
             * 1000
         )
 
+        logger.exception(
+            "Falha na geração da resposta."
+        )
+
         return {
             "success": False,
+
             "answer": "",
+
             "provider": provider,
+
             "model": model,
+
             "latency_ms": latency_ms,
+
+            "temperature": _get_temperature(),
+
+            "max_tokens": _get_max_tokens(),
+
             "error": {
-                "type": type(exc).__name__,
-                "message": str(exc)[:500],
+                "type": type(
+                    exc
+                ).__name__,
+
+                "message": str(
+                    exc
+                )[:500],
             },
         }
 
 
 # ============================================================
-# STATUS DO SERVIÇO
+# EXECUÇÃO POR AGENTE
 # ============================================================
 
-def ai_status():
+def generate_agent_answer(
+    query: str,
+    chunks: Sequence[Any] | None = None,
+    agent: str = AGENT_GENERAL,
+) -> Dict[str, Any]:
     """
-    Retorna o estado atual do serviço de IA.
+    Executa um agente especializado.
 
-    Utilizado posteriormente no Dashboard.
+    Exemplo:
+
+        generate_agent_answer(
+            query,
+            chunks,
+            "risk"
+        )
+    """
+
+    agent = _safe_text(
+        agent
+    ).lower()
+
+    if agent not in AGENT_LABELS:
+
+        agent = AGENT_GENERAL
+
+    instruction = get_agent_instruction(
+        agent
+    )
+
+    result = generate_answer_result(
+        query=query,
+        chunks=chunks,
+        agent_instruction=instruction,
+    )
+
+    result.update(
+        {
+            "agent": agent,
+            "agent_label": AGENT_LABELS[
+                agent
+            ],
+        }
+    )
+
+    return result
+
+
+# ============================================================
+# FUNÇÕES DOS AGENTES
+# ============================================================
+
+def legal_answer(
+    query: str,
+    chunks: Sequence[Any] | None = None,
+) -> Dict[str, Any]:
+
+    return generate_agent_answer(
+        query=query,
+        chunks=chunks,
+        agent=AGENT_LEGAL,
+    )
+
+
+def risk_answer(
+    query: str,
+    chunks: Sequence[Any] | None = None,
+) -> Dict[str, Any]:
+
+    return generate_agent_answer(
+        query=query,
+        chunks=chunks,
+        agent=AGENT_RISK,
+    )
+
+
+def summary_answer(
+    query: str,
+    chunks: Sequence[Any] | None = None,
+) -> Dict[str, Any]:
+
+    return generate_agent_answer(
+        query=query,
+        chunks=chunks,
+        agent=AGENT_SUMMARY,
+    )
+
+
+def general_answer(
+    query: str,
+    chunks: Sequence[Any] | None = None,
+) -> Dict[str, Any]:
+
+    return generate_agent_answer(
+        query=query,
+        chunks=chunks,
+        agent=AGENT_GENERAL,
+    )
+
+
+# ============================================================
+# STATUS
+# ============================================================
+
+def ai_status() -> Dict[str, Any]:
+    """
+    Retorna o estado atual do AI Service.
     """
 
     provider = _get_provider()
@@ -645,22 +1262,63 @@ def ai_status():
 
         configured = False
 
+    if configured:
+
+        status = "connected"
+
+    elif provider == "demo":
+
+        status = "demo"
+
+    else:
+
+        status = "not_configured"
+
     return {
-        "provider": provider,
-        "model": model,
         "configured": configured,
+
+        "provider": provider,
+
+        "model": model,
+
+        "status": status,
+
         "temperature": _get_temperature(),
+
         "max_tokens": _get_max_tokens(),
+
         "timeout": _get_timeout(),
-        "status": (
-            "connected"
-            if configured
-            else (
-                "demo"
-                if provider == "demo"
-                else "not_configured"
-            )
-        ),
+
+        "agents": [
+            {
+                "id": AGENT_LEGAL,
+                "name": AGENT_LABELS[
+                    AGENT_LEGAL
+                ],
+                "status": "active",
+            },
+            {
+                "id": AGENT_RISK,
+                "name": AGENT_LABELS[
+                    AGENT_RISK
+                ],
+                "status": "active",
+            },
+            {
+                "id": AGENT_SUMMARY,
+                "name": AGENT_LABELS[
+                    AGENT_SUMMARY
+                ],
+                "status": "active",
+            },
+            {
+                "id": AGENT_GENERAL,
+                "name": AGENT_LABELS[
+                    AGENT_GENERAL
+                ],
+                "status": "active",
+            },
+        ],
     }
 
 
@@ -668,16 +1326,142 @@ def ai_status():
 # LIMPEZA DE CACHE
 # ============================================================
 
-def clear_ai_cache():
+def clear_ai_cache() -> Dict[str, Any]:
     """
-    Limpa os clientes LLM mantidos em memória.
+    Limpa os clientes LLM em memória.
 
-    Deve ser utilizado quando houver troca de:
-        - API Key;
-        - provider;
-        - configuração.
+    Útil após alteração de:
+
+    - API Key
+    - Provider
+    - Modelo
+    - Configuração
     """
 
     _get_gemini_client.cache_clear()
 
     _get_openai_client.cache_clear()
+
+    return {
+        "success": True,
+        "message": "Cache dos clientes LLM limpo.",
+    }
+
+
+# ============================================================
+# SELF TEST
+# ============================================================
+
+def self_test() -> Dict[str, Any]:
+    """
+    Teste estrutural.
+
+    Não exige API Key.
+    """
+
+    chunks = [
+        {
+            "chunk_id": "chunk-001",
+            "document_id": "doc-001",
+            "document": "Contrato.pdf",
+            "page": 1,
+            "content": (
+                "O presente contrato tem por objeto "
+                "a prestação de serviços de consultoria."
+            ),
+        }
+    ]
+
+    try:
+
+        prompt = build_prompt(
+            query="Qual é o objeto do contrato?",
+            chunks=chunks,
+            agent_instruction=(
+                legal_agent_instruction()
+            ),
+        )
+
+        return {
+            "status": "ok",
+
+            "module": "services.ai",
+
+            "provider": _get_provider(),
+
+            "model": _get_model(),
+
+            "prompt_generated": bool(
+                prompt
+            ),
+
+            "prompt_length": len(
+                prompt
+            ),
+
+            "agents": list(
+                AGENT_LABELS.keys()
+            ),
+        }
+
+    except Exception as exc:
+
+        return {
+            "status": "error",
+
+            "module": "services.ai",
+
+            "error": {
+                "type": type(
+                    exc
+                ).__name__,
+
+                "message": str(
+                    exc
+                )[:500],
+            },
+        }
+
+
+# ============================================================
+# EXECUÇÃO DIRETA
+# ============================================================
+
+if __name__ == "__main__":
+
+    print("=" * 70)
+
+    print(
+        "AI SERVICE V3.2 - SELF TEST"
+    )
+
+    print("=" * 70)
+
+    result = self_test()
+
+    print(
+        "Status:",
+        result.get("status"),
+    )
+
+    print(
+        "Provider:",
+        result.get("provider"),
+    )
+
+    print(
+        "Model:",
+        result.get("model"),
+    )
+
+    print(
+        "Prompt:",
+        result.get("prompt_generated"),
+    )
+
+    print(
+        "Agentes:",
+        result.get("agents"),
+    )
+
+    print("=" * 70)

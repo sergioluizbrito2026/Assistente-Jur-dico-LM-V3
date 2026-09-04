@@ -1,1304 +1,871 @@
-"""
-Assistente Jurídico SaaS IA V3
-services/evaluation.py
+from pathlib import Path
+from functools import lru_cache
+from threading import RLock
+import json
+import os
+import tempfile
 
-Módulo de avaliação determinística das respostas do RAG.
+import numpy as np
 
-Métricas principais:
-
-1. Context Relevance
-   Mede o quanto os chunks recuperados são relevantes para a pergunta.
-
-2. Citation Coverage
-   Mede a presença e validade das citações utilizadas pela resposta.
-
-3. Groundedness
-   Mede o quanto as frases da resposta apresentam evidências
-   lexicais compatíveis com o contexto recuperado.
-
-4. Overall
-   Score geral ponderado das métricas anteriores.
-
-Características:
-- Não depende de LLM.
-- Não depende de FAISS.
-- Não depende de Streamlit.
-- Não altera a resposta da IA.
-- Aceita diferentes formatos de chunks/citações.
-- Trata entradas vazias ou inválidas.
-- Compatível com o RAG Pipeline V3.
-"""
-
-from __future__ import annotations
-
-import re
-import unicodedata
-from typing import Any, Dict, Iterable, List, Sequence, Tuple
+from db import get_connection
 
 
 # ============================================================
 # CONFIGURAÇÃO
 # ============================================================
 
-MIN_TOKEN_LEN = 3
+ROOT = Path(__file__).resolve().parents[1]
 
-WEIGHT_CONTEXT = 0.40
-WEIGHT_CITATIONS = 0.25
-WEIGHT_GROUNDEDNESS = 0.35
+INDEX_DIR = ROOT / "storage" / "vector"
+INDEX_DIR.mkdir(parents=True, exist_ok=True)
 
+EMBED_MODEL = os.getenv(
+    "EMBEDDING_MODEL",
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+)
 
-# ============================================================
-# STOPWORDS
-# ============================================================
+EMBED_BATCH_SIZE = int(
+    os.getenv(
+        "EMBED_BATCH_SIZE",
+        "32",
+    )
+)
 
-STOPWORDS = {
-    # Português
-    "a",
-    "à",
-    "às",
-    "ao",
-    "aos",
-    "as",
-    "com",
-    "como",
-    "da",
-    "das",
-    "de",
-    "do",
-    "dos",
-    "e",
-    "é",
-    "em",
-    "entre",
-    "essa",
-    "esse",
-    "esta",
-    "este",
-    "estas",
-    "estes",
-    "foi",
-    "for",
-    "há",
-    "isso",
-    "isto",
-    "já",
-    "mais",
-    "mas",
-    "mesmo",
-    "na",
-    "nas",
-    "não",
-    "no",
-    "nos",
-    "num",
-    "numa",
-    "o",
-    "os",
-    "ou",
-    "para",
-    "pela",
-    "pelas",
-    "pelo",
-    "pelos",
-    "por",
-    "qual",
-    "quando",
-    "que",
-    "se",
-    "sem",
-    "ser",
-    "são",
-    "sua",
-    "suas",
-    "seu",
-    "seus",
-    "tem",
-    "têm",
-    "um",
-    "uma",
-    "umas",
-    "uns",
+# Cache em memória dos índices FAISS
+_INDEX_CACHE = {}
 
-    # Inglês
-    "the",
-    "and",
-    "for",
-    "with",
-    "from",
-    "this",
-    "that",
-    "these",
-    "those",
-    "are",
-    "was",
-    "were",
-    "have",
-    "has",
-    "had",
-    "not",
-    "but",
-    "can",
-    "may",
-    "into",
-    "about",
-    "what",
-    "which",
-    "where",
-    "when",
-}
+# Protege operações simultâneas no cache
+_CACHE_LOCK = RLock()
 
 
 # ============================================================
-# NORMALIZAÇÃO
+# MODELO DE EMBEDDINGS
 # ============================================================
 
-def _normalize_text(text: Any) -> str:
+@lru_cache(maxsize=1)
+def _load_model():
     """
-    Normaliza texto para comparação.
-
-    Remove diferenças de:
-    - maiúsculas/minúsculas;
-    - acentuação;
-    - espaços laterais.
-
-    Não modifica o texto original armazenado no sistema.
+    Carrega o modelo de embeddings uma única vez por processo.
     """
 
-    if text is None:
-        return ""
+    from sentence_transformers import SentenceTransformer
 
-    text = str(text)
-
-    text = unicodedata.normalize(
-        "NFKD",
-        text,
+    return SentenceTransformer(
+        EMBED_MODEL
     )
 
-    text = "".join(
-        char
-        for char in text
-        if not unicodedata.combining(char)
-    )
 
-    return text.lower().strip()
+# ============================================================
+# CAMINHOS DO ÍNDICE
+# ============================================================
+
+def _paths(org_id):
+    """
+    Retorna os arquivos FAISS e metadados da organização.
+    """
+
+    org_id = int(org_id)
+
+    fp = INDEX_DIR / f"org_{org_id}.faiss"
+    mp = INDEX_DIR / f"org_{org_id}.json"
+
+    return fp, mp
+
+
+def index_exists(org_id):
+    """
+    Verifica se o índice da organização existe.
+    """
+
+    fp, mp = _paths(org_id)
+
+    return (
+        fp.exists()
+        and mp.exists()
+    )
 
 
 # ============================================================
-# TOKENIZAÇÃO
+# INVALIDAÇÃO DO CACHE
 # ============================================================
 
-def _tokens(text: Any) -> set[str]:
+def _invalidate_index_cache(org_id=None):
     """
-    Extrai tokens relevantes do texto.
+    Remove índice(s) do cache em memória.
     """
 
-    normalized = _normalize_text(text)
+    with _CACHE_LOCK:
 
-    raw_tokens = re.findall(
-        r"[a-z0-9]+",
-        normalized,
+        if org_id is None:
+            _INDEX_CACHE.clear()
+            return
+
+        _INDEX_CACHE.pop(
+            int(org_id),
+            None,
+        )
+
+
+# ============================================================
+# CARREGAMENTO DO FAISS
+# ============================================================
+
+def _load_index(org_id):
+    """
+    Carrega FAISS + metadados.
+
+    Utiliza cache em memória e verifica alteração
+    dos arquivos.
+    """
+
+    import faiss
+
+    org_id = int(org_id)
+
+    fp, mp = _paths(org_id)
+
+    if (
+        not fp.exists()
+        or not mp.exists()
+    ):
+        return None, []
+
+    try:
+
+        faiss_mtime = fp.stat().st_mtime_ns
+        meta_mtime = mp.stat().st_mtime_ns
+
+    except OSError:
+
+        return None, []
+
+    with _CACHE_LOCK:
+
+        cached = _INDEX_CACHE.get(
+            org_id
+        )
+
+        if cached:
+
+            cached_faiss_mtime = cached.get(
+                "faiss_mtime"
+            )
+
+            cached_meta_mtime = cached.get(
+                "meta_mtime"
+            )
+
+            if (
+                cached_faiss_mtime == faiss_mtime
+                and cached_meta_mtime == meta_mtime
+            ):
+
+                return (
+                    cached["index"],
+                    cached["meta"],
+                )
+
+        try:
+
+            index = faiss.read_index(
+                str(fp)
+            )
+
+            meta = json.loads(
+                mp.read_text(
+                    encoding="utf-8"
+                )
+            )
+
+            if not isinstance(
+                meta,
+                list,
+            ):
+                meta = []
+
+            _INDEX_CACHE[org_id] = {
+                "index": index,
+                "meta": meta,
+                "faiss_mtime": faiss_mtime,
+                "meta_mtime": meta_mtime,
+            }
+
+            return (
+                index,
+                meta,
+            )
+
+        except Exception:
+
+            # Índice corrompido ou incompatível.
+            _INDEX_CACHE.pop(
+                org_id,
+                None,
+            )
+
+            return None, []
+
+
+# ============================================================
+# ESCRITA ATÔMICA
+# ============================================================
+
+def _atomic_write_index(
+    org_id,
+    index,
+    meta,
+):
+    """
+    Grava FAISS e JSON de forma atômica.
+
+    Evita deixar o sistema com um índice parcialmente
+    gravado caso o processo seja interrompido.
+    """
+
+    import faiss
+
+    fp, mp = _paths(org_id)
+
+    INDEX_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
     )
+
+    faiss_tmp = None
+    meta_tmp = None
+
+    try:
+
+        # ----------------------------------------------------
+        # FAISS
+        # ----------------------------------------------------
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".faiss",
+            dir=INDEX_DIR,
+            delete=False,
+        ) as tmp:
+
+            faiss_tmp = Path(
+                tmp.name
+            )
+
+        faiss.write_index(
+            index,
+            str(faiss_tmp),
+        )
+
+        os.replace(
+            faiss_tmp,
+            fp,
+        )
+
+        # ----------------------------------------------------
+        # METADADOS
+        # ----------------------------------------------------
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".json",
+            dir=INDEX_DIR,
+            mode="w",
+            encoding="utf-8",
+            delete=False,
+        ) as tmp:
+
+            meta_tmp = Path(
+                tmp.name
+            )
+
+            json.dump(
+                meta,
+                tmp,
+                ensure_ascii=False,
+                separators=(
+                    ",",
+                    ":",
+                ),
+            )
+
+            tmp.flush()
+
+        os.replace(
+            meta_tmp,
+            mp,
+        )
+
+    finally:
+
+        if (
+            faiss_tmp
+            and faiss_tmp.exists()
+        ):
+
+            try:
+                faiss_tmp.unlink()
+            except OSError:
+                pass
+
+        if (
+            meta_tmp
+            and meta_tmp.exists()
+        ):
+
+            try:
+                meta_tmp.unlink()
+            except OSError:
+                pass
+
+    _invalidate_index_cache(
+        org_id
+    )
+
+    _load_index(
+        org_id
+    )
+
+
+# ============================================================
+# BUSCA DE CHUNKS NO BANCO
+# ============================================================
+
+def _fetch_chunks(
+    org_id,
+    document_id=None,
+):
+    """
+    Busca chunks trazendo o nome do documento através
+    de JOIN.
+
+    Isso evita consultas N+1 durante a busca semântica.
+    """
+
+    org_id = int(org_id)
+
+    with get_connection() as c:
+
+        if document_id is not None:
+
+            rows = c.execute(
+                """
+                SELECT
+                    ch.id,
+                    ch.organization_id,
+                    ch.content,
+                    ch.document_id,
+                    ch.page,
+                    ch.chunk_index,
+                    d.name AS document_name
+                FROM chunks ch
+                INNER JOIN documents d
+                    ON d.id = ch.document_id
+                WHERE
+                    ch.organization_id = ?
+                    AND ch.document_id = ?
+                ORDER BY ch.id
+                """,
+                (
+                    org_id,
+                    int(document_id),
+                ),
+            ).fetchall()
+
+        else:
+
+            rows = c.execute(
+                """
+                SELECT
+                    ch.id,
+                    ch.organization_id,
+                    ch.content,
+                    ch.document_id,
+                    ch.page,
+                    ch.chunk_index,
+                    d.name AS document_name
+                FROM chunks ch
+                INNER JOIN documents d
+                    ON d.id = ch.document_id
+                WHERE
+                    ch.organization_id = ?
+                ORDER BY ch.id
+                """,
+                (
+                    org_id,
+                ),
+            ).fetchall()
+
+    return rows
+
+
+# ============================================================
+# CONVERSÃO DE METADADOS
+# ============================================================
+
+def _row_to_metadata(row):
+    """
+    Converte Row SQLite em metadata persistível.
+    """
 
     return {
-        token
-        for token in raw_tokens
-        if len(token) >= MIN_TOKEN_LEN
-        and token not in STOPWORDS
+        "id": int(
+            row["id"]
+        ),
+        "organization_id": int(
+            row["organization_id"]
+        ),
+        "document_id": int(
+            row["document_id"]
+        ),
+        "document": (
+            row["document_name"]
+            or "Desconhecido"
+        ),
+        "content": row["content"],
+        "page": row["page"],
+        "chunk_index": row["chunk_index"],
     }
 
 
 # ============================================================
-# UTILITÁRIOS NUMÉRICOS
+# CONSTRUÇÃO COMPLETA DO ÍNDICE
 # ============================================================
 
-def _clip(value: float) -> float:
+def build_index_for_org(
+    org_id,
+):
     """
-    Mantém o valor entre 0 e 1.
+    Reconstrói completamente o índice de uma organização.
+
+    Utilizado para:
+
+    - primeira indexação;
+    - recuperação;
+    - manutenção;
+    - reindexação manual.
     """
 
-    try:
-        value = float(value)
-    except (TypeError, ValueError):
-        return 0.0
+    org_id = int(org_id)
 
-    if value != value:
-        return 0.0
-
-    return max(
-        0.0,
-        min(1.0, value),
+    rows = _fetch_chunks(
+        org_id
     )
 
+    if not rows:
 
-def _safe_float(
-    value: Any,
-    default: float = 0.0,
-) -> float:
-    """
-    Converte um valor para float com segurança.
-    """
-
-    try:
-        return _clip(float(value))
-    except (TypeError, ValueError):
-        return default
-
-
-# ============================================================
-# EXTRAÇÃO DE CONTEÚDO DOS CHUNKS
-# ============================================================
-
-def _chunk_content(chunk: Any) -> str:
-    """
-    Extrai o conteúdo de um chunk.
-
-    Compatível com estruturas como:
-
-        {
-            "content": "...",
-        }
-
-    ou:
-
-        {
-            "text": "...",
-        }
-
-    ou:
-
-        {
-            "page_content": "...",
-        }
-    """
-
-    if chunk is None:
-        return ""
-
-    if isinstance(chunk, str):
-        return chunk
-
-    if not isinstance(chunk, dict):
-        return str(chunk)
-
-    possible_fields = (
-        "content",
-        "text",
-        "chunk",
-        "page_content",
-        "document_content",
-        "body",
-    )
-
-    for field in possible_fields:
-
-        value = chunk.get(field)
-
-        if value:
-            return str(value)
-
-    return ""
-
-
-# ============================================================
-# ID DE CHUNK
-# ============================================================
-
-def _chunk_id(chunk: Any) -> str:
-    """
-    Obtém o identificador do chunk.
-    """
-
-    if not isinstance(chunk, dict):
-        return ""
-
-    for field in (
-        "chunk_id",
-        "id",
-        "chunk",
-    ):
-        value = chunk.get(field)
-
-        if value is not None:
-            return str(value)
-
-    return ""
-
-
-# ============================================================
-# ID DO DOCUMENTO
-# ============================================================
-
-def _document_id(chunk: Any) -> str:
-    """
-    Obtém o identificador do documento.
-    """
-
-    if not isinstance(chunk, dict):
-        return ""
-
-    for field in (
-        "document_id",
-        "document",
-        "document_name",
-        "name",
-    ):
-        value = chunk.get(field)
-
-        if value is not None:
-            return str(value)
-
-    return ""
-
-
-# ============================================================
-# SCORE DE SIMILARIDADE LEXICAL
-# ============================================================
-
-def _token_overlap(
-    left: Any,
-    right: Any,
-) -> float:
-    """
-    Calcula sobreposição de tokens.
-
-    Fórmula:
-
-        tokens_em_comum / tokens_da_pergunta
-
-    O objetivo é verificar se o contexto contém termos relevantes
-    para a consulta.
-    """
-
-    left_tokens = _tokens(left)
-    right_tokens = _tokens(right)
-
-    if not left_tokens or not right_tokens:
-        return 0.0
-
-    intersection = left_tokens.intersection(
-        right_tokens
-    )
-
-    return _clip(
-        len(intersection)
-        / max(len(left_tokens), 1)
-    )
-
-
-# ============================================================
-# CONTEXT RELEVANCE
-# ============================================================
-
-def context_relevance(
-    question: str,
-    chunks: Sequence[Any],
-) -> float:
-    """
-    Mede a relevância do contexto recuperado.
-
-    O cálculo combina:
-
-    1. Sobreposição lexical da pergunta com os chunks.
-    2. Score do retriever, quando disponível.
-    3. Score do reranker, quando disponível.
-
-    O reranker recebe maior prioridade quando existe.
-    """
-
-    question = (question or "").strip()
-
-    if not question:
-        return 0.0
-
-    if not chunks:
-        return 0.0
-
-    question_tokens = _tokens(question)
-
-    if not question_tokens:
-        return 0.0
-
-    scores: List[float] = []
-
-    for chunk in chunks:
-
-        content = _chunk_content(chunk)
-
-        if not content:
-            continue
-
-        lexical = _token_overlap(
-            question,
-            content,
+        _invalidate_index_cache(
+            org_id
         )
 
-        semantic_hint = 0.0
+        return 0
 
-        if isinstance(chunk, dict):
+    model = _load_model()
 
-            reranker_score = chunk.get(
-                "reranker_score"
-            )
-
-            retriever_score = chunk.get(
-                "retriever_score"
-            )
-
-            if reranker_score is not None:
-                semantic_hint = _safe_float(
-                    reranker_score
-                )
-
-            elif retriever_score is not None:
-                semantic_hint = _safe_float(
-                    retriever_score
-                )
-
-        # Se houver score externo, combina com a evidência lexical.
-        if semantic_hint > 0:
-            score = (
-                lexical * 0.70
-                + semantic_hint * 0.30
-            )
-        else:
-            score = lexical
-
-        scores.append(
-            _clip(score)
-        )
-
-    if not scores:
-        return 0.0
-
-    # Prioriza os melhores contextos.
-    scores.sort(reverse=True)
-
-    top_scores = scores[:5]
-
-    return _clip(
-        sum(top_scores)
-        / len(top_scores)
-    )
-
-
-# ============================================================
-# EXTRAÇÃO DE CITAÇÕES DA RESPOSTA
-# ============================================================
-
-def _extract_citation_ids(
-    answer: str,
-) -> List[str]:
-    """
-    Extrai citações no padrão:
-
-        [1]
-        [2]
-        [10]
-
-    Também reconhece:
-
-        [1, 2]
-        [1][2]
-    """
-
-    if not answer:
-        return []
-
-    matches = re.findall(
-        r"\[(\d+)\]",
-        str(answer),
-    )
-
-    result: List[str] = []
-
-    for value in matches:
-
-        if value not in result:
-            result.append(value)
-
-    return result
-
-
-# ============================================================
-# NORMALIZAÇÃO DE CITAÇÕES
-# ============================================================
-
-def _citation_id(
-    citation: Any,
-    fallback: int,
-) -> str:
-    """
-    Obtém o ID de uma citação.
-    """
-
-    if isinstance(citation, dict):
-
-        value = citation.get("id")
-
-        if value is not None:
-            return str(value)
-
-        value = citation.get(
-            "citation_id"
-        )
-
-        if value is not None:
-            return str(value)
-
-    elif citation is not None:
-
-        return str(citation)
-
-    return str(fallback)
-
-
-def _citation_content(
-    citation: Any,
-) -> str:
-    """
-    Obtém conteúdo associado à citação.
-    """
-
-    if isinstance(citation, str):
-        return citation
-
-    if not isinstance(citation, dict):
-        return ""
-
-    fields = (
-        "content",
-        "text",
-        "excerpt",
-        "quote",
-        "evidence",
-        "page_content",
-    )
-
-    for field in fields:
-
-        value = citation.get(field)
-
-        if value:
-            return str(value)
-
-    return ""
-
-
-# ============================================================
-# CITATION COVERAGE
-# ============================================================
-
-def citation_coverage(
-    answer: str,
-    citations: Sequence[Any],
-) -> float:
-    """
-    Mede a cobertura das citações.
-
-    A métrica considera:
-
-    - quantidade de referências presentes na resposta;
-    - quantidade de referências válidas;
-    - cobertura do conjunto de evidências disponíveis.
-
-    Se não houver citações disponíveis, retorna 0.
-    """
-
-    answer = answer or ""
-
-    if not citations:
-        return 0.0
-
-    citation_ids = {
-        _citation_id(
-            citation,
-            index + 1,
-        )
-        for index, citation in enumerate(citations)
-    }
-
-    if not citation_ids:
-        return 0.0
-
-    used_ids = _extract_citation_ids(
-        answer
-    )
-
-    if not used_ids:
-        return 0.0
-
-    valid_ids = [
-        citation_id
-        for citation_id in used_ids
-        if citation_id in citation_ids
+    texts = [
+        row["content"]
+        for row in rows
+        if row["content"]
     ]
 
-    if not valid_ids:
-        return 0.0
+    if not texts:
+        return 0
 
-    # Precisão das referências usadas.
-    precision = (
-        len(valid_ids)
-        / max(len(used_ids), 1)
+    vectors = model.encode(
+        texts,
+        normalize_embeddings=True,
+        show_progress_bar=False,
+        batch_size=EMBED_BATCH_SIZE,
     )
 
-    # Cobertura das evidências disponíveis.
-    coverage = (
-        len(set(valid_ids))
-        / max(len(citation_ids), 1)
+    vectors = np.asarray(
+        vectors,
+        dtype="float32",
     )
 
-    # Evita que apenas uma citação de um conjunto enorme
-    # seja tratada como cobertura perfeita.
-    score = (
-        precision * 0.60
-        + coverage * 0.40
+    import faiss
+
+    dimension = vectors.shape[1]
+
+    index = faiss.IndexFlatIP(
+        dimension
     )
 
-    return _clip(score)
+    index.add(
+        vectors
+    )
+
+    meta = [
+        _row_to_metadata(row)
+        for row in rows
+        if row["content"]
+    ]
+
+    _atomic_write_index(
+        org_id,
+        index,
+        meta,
+    )
+
+    return len(meta)
 
 
 # ============================================================
-# DIVISÃO EM SENTENÇAS
+# INDEXAÇÃO INCREMENTAL
 # ============================================================
 
-def _split_sentences(
-    text: str,
-) -> List[str]:
+def upsert_document_index(
+    org_id,
+    document_id,
+):
     """
-    Divide uma resposta em sentenças.
+    Adiciona somente os chunks do documento ao índice.
 
-    Mantém frases com tamanho suficiente para avaliação.
+    Se o índice não existir, realiza a construção completa.
     """
 
-    if not text:
-        return []
+    org_id = int(org_id)
+    document_id = int(document_id)
 
-    text = str(text).strip()
-
-    if not text:
-        return []
-
-    # Remove blocos de markdown excessivamente curtos.
-    parts = re.split(
-        r"(?<=[.!?])\s+|\n+",
-        text,
+    rows = _fetch_chunks(
+        org_id,
+        document_id=document_id,
     )
 
-    sentences = []
+    if not rows:
+        return 0
 
-    for part in parts:
+    index, meta = _load_index(
+        org_id
+    )
 
-        part = part.strip()
+    # --------------------------------------------------------
+    # Índice ainda não existe
+    # --------------------------------------------------------
 
-        if not part:
-            continue
+    if index is None:
 
-        # Ignora somente marcadores.
-        if re.fullmatch(
-            r"[-*•#\s]+",
-            part,
+        return build_index_for_org(
+            org_id
+        )
+
+    # --------------------------------------------------------
+    # Chunks já existentes
+    # --------------------------------------------------------
+
+    existing_ids = {
+        int(item["id"])
+        for item in meta
+        if item.get("id") is not None
+    }
+
+    new_rows = [
+        row
+        for row in rows
+        if int(row["id"])
+        not in existing_ids
+    ]
+
+    if not new_rows:
+        return 0
+
+    texts = [
+        row["content"]
+        for row in new_rows
+        if row["content"]
+    ]
+
+    if not texts:
+        return 0
+
+    model = _load_model()
+
+    vectors = model.encode(
+        texts,
+        normalize_embeddings=True,
+        show_progress_bar=False,
+        batch_size=EMBED_BATCH_SIZE,
+    )
+
+    vectors = np.asarray(
+        vectors,
+        dtype="float32",
+    )
+
+    # --------------------------------------------------------
+    # Segurança dimensional
+    # --------------------------------------------------------
+
+    if index.d != vectors.shape[1]:
+
+        # Modelo atual incompatível.
+        # Rebuild completo é mais seguro.
+
+        return build_index_for_org(
+            org_id
+        )
+
+    # --------------------------------------------------------
+    # Adiciona novos vetores
+    # --------------------------------------------------------
+
+    index.add(
+        vectors
+    )
+
+    meta.extend(
+        _row_to_metadata(row)
+        for row in new_rows
+        if row["content"]
+    )
+
+    _atomic_write_index(
+        org_id,
+        index,
+        meta,
+    )
+
+    return len(new_rows)
+
+
+# ============================================================
+# BUSCA SEMÂNTICA
+# ============================================================
+
+def semantic_search(
+    query,
+    org_id,
+    top_k=10,
+):
+    """
+    Busca semântica utilizando FAISS.
+
+    O modelo e o índice ficam em memória sempre que possível.
+    """
+
+    org_id = int(org_id)
+
+    query = (
+        query
+        or ""
+    ).strip()
+
+    if not query:
+        return []
+
+    try:
+
+        top_k = int(
+            top_k
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+
+        top_k = 10
+
+    top_k = max(
+        1,
+        min(
+            top_k,
+            100,
+        ),
+    )
+
+    # --------------------------------------------------------
+    # Carrega índice
+    # --------------------------------------------------------
+
+    index, meta = _load_index(
+        org_id
+    )
+
+    if index is None:
+
+        build_index_for_org(
+            org_id
+        )
+
+        index, meta = _load_index(
+            org_id
+        )
+
+    if (
+        index is None
+        or not meta
+    ):
+        return []
+
+    if index.ntotal <= 0:
+        return []
+
+    # --------------------------------------------------------
+    # Embedding da pergunta
+    # --------------------------------------------------------
+
+    model = _load_model()
+
+    query_vector = model.encode(
+        [query],
+        normalize_embeddings=True,
+        show_progress_bar=False,
+    )
+
+    query_vector = np.asarray(
+        query_vector,
+        dtype="float32",
+    )
+
+    # --------------------------------------------------------
+    # Pesquisa FAISS
+    # --------------------------------------------------------
+
+    search_k = min(
+        top_k,
+        index.ntotal,
+    )
+
+    scores, ids = index.search(
+        query_vector,
+        search_k,
+    )
+
+    results = []
+
+    for score, idx in zip(
+        scores[0],
+        ids[0],
+    ):
+
+        idx = int(
+            idx
+        )
+
+        if (
+            idx < 0
+            or idx >= len(meta)
         ):
             continue
 
-        if len(_tokens(part)) >= 2:
-            sentences.append(part)
+        item = meta[idx]
 
-    return sentences
+        # ----------------------------------------------------
+        # Isolamento da organização
+        # ----------------------------------------------------
 
+        if int(
+            item.get(
+                "organization_id",
+                -1,
+            )
+        ) != org_id:
 
-# ============================================================
-# GROUNDEDNESS
-# ============================================================
-
-def groundedness(
-    answer: str,
-    chunks: Sequence[Any],
-) -> float:
-    """
-    Estima groundedness por suporte lexical.
-
-    Para cada sentença da resposta:
-
-        tokens da sentença
-        versus
-        tokens do contexto recuperado.
-
-    Uma sentença é considerada suportada quando existe
-    sobreposição suficiente com o contexto.
-
-    Isto é uma heurística determinística, não uma prova
-    semântica absoluta.
-    """
-
-    if not answer:
-        return 0.0
-
-    if not chunks:
-        return 0.0
-
-    context_parts = [
-        _chunk_content(chunk)
-        for chunk in chunks
-    ]
-
-    context_parts = [
-        content
-        for content in context_parts
-        if content
-    ]
-
-    if not context_parts:
-        return 0.0
-
-    full_context = " ".join(
-        context_parts
-    )
-
-    sentences = _split_sentences(
-        answer
-    )
-
-    if not sentences:
-        return 0.0
-
-    sentence_scores: List[float] = []
-
-    context_tokens = _tokens(
-        full_context
-    )
-
-    if not context_tokens:
-        return 0.0
-
-    for sentence in sentences:
-
-        sentence_tokens = _tokens(
-            sentence
-        )
-
-        if not sentence_tokens:
             continue
 
-        overlap = (
-            len(
-                sentence_tokens.intersection(
-                    context_tokens
-                )
-            )
-            / max(
-                len(sentence_tokens),
-                1,
-            )
+        results.append(
+            {
+                "chunk_id": int(
+                    item["id"]
+                ),
+
+                "document_id": int(
+                    item["document_id"]
+                ),
+
+                "organization_id": org_id,
+
+                "document": item.get(
+                    "document",
+                    "Desconhecido",
+                ),
+
+                "content": item.get(
+                    "content",
+                    "",
+                ),
+
+                "page": item.get(
+                    "page",
+                    "N/D",
+                ),
+
+                "chunk_index": item.get(
+                    "chunk_index",
+                    0,
+                ),
+
+                "retriever_score": float(
+                    score
+                ),
+            }
         )
 
-        # Procura também o melhor chunk individual.
-        best_chunk_overlap = 0.0
-
-        for content in context_parts:
-
-            chunk_tokens = _tokens(
-                content
-            )
-
-            if not chunk_tokens:
-                continue
-
-            local_overlap = (
-                len(
-                    sentence_tokens.intersection(
-                        chunk_tokens
-                    )
-                )
-                / max(
-                    len(sentence_tokens),
-                    1,
-                )
-            )
-
-            best_chunk_overlap = max(
-                best_chunk_overlap,
-                local_overlap,
-            )
-
-        score = max(
-            overlap,
-            best_chunk_overlap,
-        )
-
-        sentence_scores.append(
-            _clip(score)
-        )
-
-    if not sentence_scores:
-        return 0.0
-
-    return _clip(
-        sum(sentence_scores)
-        / len(sentence_scores)
-    )
+    return results
 
 
 # ============================================================
-# SUPORTE POR SENTENÇA
+# MANUTENÇÃO
 # ============================================================
 
-def _supported_sentences(
-    answer: str,
-    chunks: Sequence[Any],
-) -> Tuple[int, int]:
+def rebuild_index(
+    org_id,
+):
     """
-    Retorna:
-
-        (sentenças suportadas, total de sentenças)
+    Alias explícito para reindexação manual.
     """
 
-    sentences = _split_sentences(
-        answer
+    return build_index_for_org(
+        org_id
     )
 
-    if not sentences or not chunks:
-        return 0, len(sentences)
 
-    context = " ".join(
-        _chunk_content(chunk)
-        for chunk in chunks
-    )
+def clear_embedding_cache():
+    """
+    Limpa modelos e índices carregados em memória.
 
-    context_tokens = _tokens(
-        context
-    )
+    Útil para:
 
-    if not context_tokens:
-        return 0, len(sentences)
+    - troca de modelo;
+    - manutenção;
+    - testes.
+    """
 
-    supported = 0
+    _invalidate_index_cache()
 
-    for sentence in sentences:
-
-        sentence_tokens = _tokens(
-            sentence
-        )
-
-        if not sentence_tokens:
-            continue
-
-        overlap = (
-            len(
-                sentence_tokens.intersection(
-                    context_tokens
-                )
-            )
-            / max(
-                len(sentence_tokens),
-                1,
-            )
-        )
-
-        # 15% de tokens relevantes em comum
-        # funciona como limiar conservador.
-        if overlap >= 0.15:
-            supported += 1
-
-    return supported, len(sentences)
+    _load_model.cache_clear()
 
 
 # ============================================================
-# SCORE DE QUALIDADE
+# TESTE DO MÓDULO
 # ============================================================
 
-def _quality_label(
-    score: float,
-) -> str:
+def self_test():
     """
-    Classifica o score geral.
-    """
+    Teste básico das funções principais.
 
-    score = _clip(score)
-
-    if score >= 0.85:
-        return "Excelente"
-
-    if score >= 0.70:
-        return "Bom"
-
-    if score >= 0.50:
-        return "Atenção"
-
-    return "Baixo"
-
-
-# ============================================================
-# RECOMENDAÇÕES
-# ============================================================
-
-def _build_recommendations(
-    context_score: float,
-    citation_score: float,
-    grounded_score: float,
-) -> List[str]:
-    """
-    Gera recomendações simples para diagnóstico.
+    Não carrega o modelo nem FAISS.
     """
 
-    recommendations: List[str] = []
+    required = [
+        "upsert_document_index",
+        "semantic_search",
+        "build_index_for_org",
+        "rebuild_index",
+        "index_exists",
+        "clear_embedding_cache",
+    ]
 
-    if context_score < 0.50:
-        recommendations.append(
-            "O contexto recuperado apresenta baixa relevância. "
-            "Revise a consulta, o chunking, os embeddings e o reranker."
-        )
-
-    if citation_score < 0.50:
-        recommendations.append(
-            "A resposta apresenta baixa cobertura de citações. "
-            "Verifique se as evidências recuperadas estão sendo referenciadas."
-        )
-
-    if grounded_score < 0.50:
-        recommendations.append(
-            "A resposta possui baixo suporte lexical no contexto. "
-            "Revise o prompt de groundedness e evite informações não presentes "
-            "nas evidências recuperadas."
-        )
-
-    if not recommendations:
-        recommendations.append(
-            "Resposta com bons sinais de relevância, citação e fundamentação."
-        )
-
-    return recommendations
-
-
-# ============================================================
-# AVALIAÇÃO COMPLETA
-# ============================================================
-
-def evaluate_answer(
-    question: str,
-    answer: str,
-    chunks: Sequence[Any] | None = None,
-    citations: Sequence[Any] | None = None,
-) -> Dict[str, Any]:
-    """
-    Executa a avaliação completa.
-
-    Compatível com:
-
-        evaluate_answer(
-            question,
-            answer,
-            result["reranked"],
-            result["citations"],
-        )
-
-    Retorna:
-
-        {
-            "context_relevance": 0.00,
-            "citation_coverage": 0.00,
-            "groundedness": 0.00,
-            "overall": 0.00,
-            ...
-        }
-    """
-
-    question = str(
-        question or ""
-    ).strip()
-
-    answer = str(
-        answer or ""
-    ).strip()
-
-    chunks = list(
-        chunks or []
-    )
-
-    citations = list(
-        citations or []
-    )
-
-    # --------------------------------------------------------
-    # Entradas inválidas
-    # --------------------------------------------------------
-
-    if not question:
-
-        return {
-            "context_relevance": 0.0,
-            "citation_coverage": 0.0,
-            "groundedness": 0.0,
-            "overall": 0.0,
-            "quality": "Baixo",
-            "valid": False,
-            "reason": "Pergunta vazia.",
-            "context_count": len(chunks),
-            "citation_count": len(citations),
-            "citation_ids_used": [],
-            "supported_sentences": 0,
-            "total_sentences": 0,
-            "recommendations": [
-                "Informe uma pergunta para executar a avaliação."
-            ],
-        }
-
-    if not answer:
-
-        return {
-            "context_relevance": context_relevance(
-                question,
-                chunks,
-            ),
-            "citation_coverage": 0.0,
-            "groundedness": 0.0,
-            "overall": 0.0,
-            "quality": "Baixo",
-            "valid": False,
-            "reason": "Resposta vazia.",
-            "context_count": len(chunks),
-            "citation_count": len(citations),
-            "citation_ids_used": [],
-            "supported_sentences": 0,
-            "total_sentences": 0,
-            "recommendations": [
-                "Informe uma resposta para executar a avaliação."
-            ],
-        }
-
-    # --------------------------------------------------------
-    # Métricas
-    # --------------------------------------------------------
-
-    context_score = context_relevance(
-        question,
-        chunks,
-    )
-
-    citation_score = citation_coverage(
-        answer,
-        citations,
-    )
-
-    grounded_score = groundedness(
-        answer,
-        chunks,
-    )
-
-    # --------------------------------------------------------
-    # Overall
-    # --------------------------------------------------------
-
-    overall = (
-        context_score * WEIGHT_CONTEXT
-        + citation_score * WEIGHT_CITATIONS
-        + grounded_score * WEIGHT_GROUNDEDNESS
-    )
-
-    overall = _clip(
-        overall
-    )
-
-    # --------------------------------------------------------
-    # Sentenças suportadas
-    # --------------------------------------------------------
-
-    supported, total = _supported_sentences(
-        answer,
-        chunks,
-    )
-
-    # --------------------------------------------------------
-    # Citações utilizadas
-    # --------------------------------------------------------
-
-    used_citation_ids = _extract_citation_ids(
-        answer
-    )
-
-    # --------------------------------------------------------
-    # Recomendações
-    # --------------------------------------------------------
-
-    recommendations = _build_recommendations(
-        context_score,
-        citation_score,
-        grounded_score,
-    )
-
-    # --------------------------------------------------------
-    # Resultado
-    # --------------------------------------------------------
+    missing = [
+        name
+        for name in required
+        if name not in globals()
+    ]
 
     return {
-        # Scores principais
-        "context_relevance": round(
-            context_score,
-            4,
-        ),
-        "citation_coverage": round(
-            citation_score,
-            4,
-        ),
-        "groundedness": round(
-            grounded_score,
-            4,
-        ),
-        "overall": round(
-            overall,
-            4,
-        ),
-
-        # Classificação
-        "quality": _quality_label(
-            overall
-        ),
-
-        # Estado
-        "valid": True,
-
-        # Diagnóstico
-        "context_count": len(
-            chunks
-        ),
-
-        "citation_count": len(
-            citations
-        ),
-
-        "citation_ids_used": used_citation_ids,
-
-        "supported_sentences": supported,
-
-        "total_sentences": total,
-
-        "recommendations": recommendations,
-
-        # Configuração utilizada
-        "weights": {
-            "context_relevance": WEIGHT_CONTEXT,
-            "citation_coverage": WEIGHT_CITATIONS,
-            "groundedness": WEIGHT_GROUNDEDNESS,
-        },
+        "valid": not missing,
+        "module": "services.embeddings",
+        "required_functions": required,
+        "missing_functions": missing,
     }
-
-
-# ============================================================
-# ALIASES
-# ============================================================
-
-def evaluate_rag(
-    question: str,
-    answer: str,
-    chunks: Sequence[Any] | None = None,
-    citations: Sequence[Any] | None = None,
-) -> Dict[str, Any]:
-    """
-    Alias para integração futura.
-    """
-
-    return evaluate_answer(
-        question,
-        answer,
-        chunks,
-        citations,
-    )
-
-
-def evaluate_response(
-    question: str,
-    answer: str,
-    chunks: Sequence[Any] | None = None,
-    citations: Sequence[Any] | None = None,
-) -> Dict[str, Any]:
-    """
-    Alias para integração futura.
-    """
-
-    return evaluate_answer(
-        question,
-        answer,
-        chunks,
-        citations,
-    )
-
-
-# ============================================================
-# TESTE INTERNO
-# ============================================================
-
-def self_test() -> Dict[str, Any]:
-    """
-    Executa um teste rápido do módulo sem depender de banco,
-    FAISS, embeddings ou LLM.
-
-    Útil para verificar se o evaluation.py está funcionando.
-    """
-
-    question = (
-        "Qual é o prazo para apresentação da contestação?"
-    )
-
-    chunks = [
-        {
-            "chunk_id": "chunk-001",
-            "document_id": "doc-001",
-            "document": "peticao.pdf",
-            "page": 3,
-            "content": (
-                "O prazo para apresentação da contestação "
-                "será de 15 dias úteis, contados conforme "
-                "a legislação processual aplicável."
-            ),
-            "retriever_score": 0.91,
-            "reranker_score": 0.94,
-        },
-        {
-            "chunk_id": "chunk-002",
-            "document_id": "doc-001",
-            "document": "peticao.pdf",
-            "page": 4,
-            "content": (
-                "A parte deverá observar as regras de "
-                "intimação e contagem dos prazos processuais."
-            ),
-            "retriever_score": 0.75,
-            "reranker_score": 0.82,
-        },
-    ]
-
-    citations = [
-        {
-            "id": 1,
-            "document": "peticao.pdf",
-            "page": 3,
-            "chunk_id": "chunk-001",
-            "content": chunks[0]["content"],
-        },
-        {
-            "id": 2,
-            "document": "peticao.pdf",
-            "page": 4,
-            "chunk_id": "chunk-002",
-            "content": chunks[1]["content"],
-        },
-    ]
-
-    answer = (
-        "Conforme o documento, o prazo para apresentação "
-        "da contestação é de 15 dias úteis. [1] "
-        "A contagem deve observar as regras de intimação "
-        "e dos prazos processuais. [2]"
-    )
-
-    result = evaluate_answer(
-        question,
-        answer,
-        chunks,
-        citations,
-    )
-
-    return result
 
 
 # ============================================================
@@ -1310,53 +877,32 @@ if __name__ == "__main__":
     result = self_test()
 
     print("=" * 60)
-    print("EVALUATION.PY V3 - SELF TEST")
+    print("EMBEDDINGS.PY V3 - SELF TEST")
     print("=" * 60)
 
     print(
-        f"Context relevance : "
-        f"{result['context_relevance']:.4f}"
+        f"Status: "
+        f"{'OK' if result['valid'] else 'ERRO'}"
     )
 
     print(
-        f"Citation coverage : "
-        f"{result['citation_coverage']:.4f}"
+        f"Funções obrigatórias: "
+        f"{len(result['required_functions'])}"
     )
 
     print(
-        f"Groundedness      : "
-        f"{result['groundedness']:.4f}"
+        f"Funções ausentes: "
+        f"{result['missing_functions']}"
     )
 
     print(
-        f"Overall            : "
-        f"{result['overall']:.4f}"
+        f"Modelo: "
+        f"{EMBED_MODEL}"
     )
 
     print(
-        f"Quality            : "
-        f"{result['quality']}"
-    )
-
-    print(
-        f"Contextos         : "
-        f"{result['context_count']}"
-    )
-
-    print(
-        f"Citações          : "
-        f"{result['citation_count']}"
-    )
-
-    print(
-        f"Sentenças         : "
-        f"{result['supported_sentences']}/"
-        f"{result['total_sentences']}"
-    )
-
-    print(
-        f"Citações usadas   : "
-        f"{result['citation_ids_used']}"
+        f"Batch size: "
+        f"{EMBED_BATCH_SIZE}"
     )
 
     print("=" * 60)

@@ -3,6 +3,7 @@ from services.agents import risk_agent
 from services.agents import summary_agent
 from services.agents import guard_agent
 
+
 """
 AI Orchestrator - Assistente Jurídico IA SaaS V3
 
@@ -34,12 +35,6 @@ AI Service
     ↓
 LLM
 """
-
-from __future__ import annotations
-
-import logging
-import time
-from typing import Any, Dict, Optional
 
 from services.rag_pipeline import rag_answer
 
@@ -417,70 +412,70 @@ def orchestrate(
     # --------------------------------------------------------
     # EXECUTAR RAG
     # --------------------------------------------------------
-try:
-    # EXECUÇÃO DO AGENTE ESPECIALIZADO
+    try:
+        # EXECUÇÃO DO AGENTE ESPECIALIZADO
 
-    if agent == AGENT_LEGAL:
-        result = legal_agent.run(
-            query=query,
-            org_id=org_id,
-            top_k=top_k,
-            rerank_k=rerank_k,
-            extra_context=extra_context,
+        if agent == AGENT_LEGAL:
+            result = legal_agent.run(
+                query=query,
+                org_id=org_id,
+                top_k=top_k,
+                rerank_k=rerank_k,
+                extra_context=extra_context,
+            )
+
+        elif agent == AGENT_RISK:
+            result = risk_agent.run(
+                query=query,
+                org_id=org_id,
+                top_k=top_k,
+                rerank_k=rerank_k,
+                extra_context=extra_context,
+            )
+
+        elif agent == AGENT_SUMMARY:
+            result = summary_agent.run(
+                query=query,
+                org_id=org_id,
+                top_k=top_k,
+                rerank_k=rerank_k,
+                extra_context=extra_context,
+            )
+
+        else:
+            # Perguntas gerais continuam usando o RAG padrão
+            result = rag_answer(
+                query=query,
+                org_id=org_id,
+                top_k=top_k,
+                rerank_k=rerank_k,
+                extra_context=extra_context,
+                agent_instruction=instruction,
+            )
+
+    except Exception as exc:
+        logger.exception("Erro no AI Orchestrator.")
+
+        latency_ms = int(
+            (time.perf_counter() - started_at) * 1000
         )
 
-    elif agent == AGENT_RISK:
-        result = risk_agent.run(
-            query=query,
-            org_id=org_id,
-            top_k=top_k,
-            rerank_k=rerank_k,
-            extra_context=extra_context,
-        )
-
-    elif agent == AGENT_SUMMARY:
-        result = summary_agent.run(
-            query=query,
-            org_id=org_id,
-            top_k=top_k,
-            rerank_k=rerank_k,
-            extra_context=extra_context,
-        )
-
-    else:
-        # Perguntas gerais continuam usando o RAG padrão
-        result = rag_answer(
-            query=query,
-            org_id=org_id,
-            top_k=top_k,
-            rerank_k=rerank_k,
-            extra_context=extra_context,
-            agent_instruction=instruction,
-        )
-
-except Exception as exc:
-    logger.exception("Erro no AI Orchestrator.")
-
-    latency_ms = int(
-        (time.perf_counter() - started_at) * 1000
-    )
-
-    return {
-        "success": False,
-        "answer": (
-            "Ocorreu um erro durante a análise. "
-            "Tente novamente."
-        ),
-        "agent": agent,
-        "agent_label": agent_label(agent),
-        "intent": agent,
-        "citations": [],
-        "context": [],
-        "evidence_count": 0,
-        "evidence_status": "error",
-        "latency_ms": latency_ms,
-        "error": str(exc),
-    }
+        return {
+            "success": False,
+            "answer": (
+                "Ocorreu um erro durante a análise. "
+                "Tente novamente."
+            ),
+            "agent": agent,
+            "agent_label": agent_label(agent),
+            "intent": agent,
+            "citations": [],
+            "context": [],
+            "evidence_count": 0,
+            "evidence_status": "error",
+            "latency_ms": latency_ms,
+            "error": str(exc),
+        }
 
     # --------------------------------------------------------
     # NORMALIZAR RESULTADO
@@ -621,3 +616,4 @@ def orchestrator_status() -> Dict[str, Any]:
         "max_top_k": MAX_TOP_K,
         "max_rerank_k": MAX_RERANK_K,
     }
+

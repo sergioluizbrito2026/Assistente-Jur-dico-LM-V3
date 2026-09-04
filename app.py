@@ -985,11 +985,10 @@ elif page == "Assistente IA":
         with st.chat_message("user"):
             st.markdown(q)
 
-                  with st.spinner(
-                    
-                      "🧠 Agente Jurídico → Guard → RAG → Retriever → Reranker → LLM..."
+            with st.spinner(
+                "🧠 Agente Jurídico → Guard → RAG → Retriever → Reranker → LLM..."
             ):
-                 try:
+                try:
                     result = call_orchestrator(
                         query=q,
                         org_id=user.get("organization_id"),

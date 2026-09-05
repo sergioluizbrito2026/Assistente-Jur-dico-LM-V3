@@ -1,4 +1,4 @@
-```python
+
 """
 Assistente Jurídico SaaS IA V3
 services/ingestion.py
@@ -1007,4 +1007,4 @@ if __name__ == "__main__":
     )
 
     print("=" * 60)
-```
+

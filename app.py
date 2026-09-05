@@ -1204,16 +1204,11 @@ elif page == "Assistente IA":
     st.markdown(
         """
         <div class="hero">
-
-            <h1>
-                🧑‍⚖️ Assistente Jurídico IA
-            </h1>
-
+            <h1>🧑‍⚖️ Assistente Jurídico IA</h1>
             <p>
                 Analise documentos, consulte sua base jurídica
                 e obtenha respostas fundamentadas em evidências.
             </p>
-
         </div>
         """,
         unsafe_allow_html=True,
@@ -1223,14 +1218,8 @@ elif page == "Assistente IA":
 
     # Histórico
     for msg in st.session_state.messages:
-
-        with st.chat_message(
-            msg["role"]
-        ):
-
-            st.markdown(
-                msg["content"]
-            )
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
     pending = st.session_state.pop(
         "pending_question",
@@ -1244,7 +1233,6 @@ elif page == "Assistente IA":
     q = q or pending
 
     if q:
-
         q = str(q).strip()
 
         if not q:
@@ -1261,12 +1249,10 @@ elif page == "Assistente IA":
             st.markdown(q)
 
         with st.chat_message("assistant"):
-
             with st.spinner(
                 "Analisando → Guard → RAG → "
                 "Retriever → Reranker → Agente → LLM..."
             ):
-
                 result = call_orchestrator(
                     query=q,
                     org_id=user.get(
@@ -1286,13 +1272,8 @@ elif page == "Assistente IA":
             ).strip()
 
             if response:
-
-                st.markdown(
-                    response
-                )
-
+                st.markdown(response)
             else:
-
                 st.warning(
                     "A execução terminou sem uma "
                     "resposta textual. As evidências "
@@ -1308,11 +1289,9 @@ elif page == "Assistente IA":
             )
 
             if result.get("error"):
-
                 with st.expander(
                     "⚠️ Detalhes técnicos"
                 ):
-
                     st.code(
                         str(
                             result["error"]
@@ -1321,7 +1300,6 @@ elif page == "Assistente IA":
 
             # Auditoria
             try:
-
                 audit(
                     user,
                     "rag.ask",
@@ -1359,7 +1337,6 @@ elif page == "Assistente IA":
                         ),
                     },
                 )
-
             except Exception:
                 pass
 

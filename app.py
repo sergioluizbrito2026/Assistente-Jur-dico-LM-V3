@@ -1094,20 +1094,18 @@ if page == "Dashboard":
                 f"Erro ao carregar documentos: {exc}"
             )
 
-    # --------------------------------------------------------
+    # ============================================================
     # LATERAL DASHBOARD
-    # --------------------------------------------------------
+    # ============================================================
 
     with right:
 
         st.markdown(
             """
             <div class="card">
-
                 <div class="section-title">
                     🛡️ Análise de Risco IA
                 </div>
-
                 <div style="
                     font-size:3rem;
                     font-weight:800;
@@ -1116,31 +1114,25 @@ if page == "Dashboard":
                 ">
                     IA
                 </div>
-
                 <div style="
                     text-align:center;
                     color:#6c7890;
                 ">
                     análise disponível
                 </div>
-
                 <hr>
-
                 <div>
                     🔴 Alto risco
                     <b style="float:right;">—</b>
                 </div>
-
                 <div>
                     🟠 Médio risco
                     <b style="float:right;">—</b>
                 </div>
-
                 <div>
                     🟢 Baixo risco
                     <b style="float:right;">—</b>
                 </div>
-
             </div>
             """,
             unsafe_allow_html=True,
@@ -1151,91 +1143,57 @@ if page == "Dashboard":
         st.markdown(
             """
             <div class="card">
-
                 <div class="section-title">
                     ⚖️ Pesquisas Jurídicas Recentes
                 </div>
-
                 <p>
-                    <b>
-                        Jurisprudência sobre danos morais
-                    </b>
+                    <b>Jurisprudência sobre danos morais</b>
                     <br>
-                    <small>
-                        Fonte a consultar
-                    </small>
+                    <small>Fonte a consultar</small>
                 </p>
-
                 <hr>
-
                 <p>
-                    <b>
-                        Prazo para interposição de recurso
-                    </b>
+                    <b>Prazo para interposição de recurso</b>
                     <br>
-                    <small>
-                        Fonte a consultar
-                    </small>
+                    <small>Fonte a consultar</small>
                 </p>
-
                 <hr>
-
                 <p>
-                    <b>
-                        Responsabilidade civil do fornecedor
-                    </b>
+                    <b>Responsabilidade civil do fornecedor</b>
                     <br>
-                    <small>
-                        Fonte a consultar
-                    </small>
+                    <small>Fonte a consultar</small>
                 </p>
-
             </div>
             """,
             unsafe_allow_html=True,
         )
 
-    st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
 
-    st.markdown(
-        """
-        <div class="card">
-
-            <div class="section-title">
-                🔎 Status da Plataforma
+        st.markdown(
+            """
+            <div class="card">
+                <div class="section-title">
+                    🔎 Status da Plataforma
+                </div>
+                <p>🟢 Banco de dados operacional</p>
+                <p>🟢 RAG disponível</p>
+                <p>🟢 Retriever/Reranker disponível</p>
+                <p>🟢 Orchestrator carregado</p>
             </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-            <p>
-                🟢 Banco de dados operacional
-            </p>
-
-            <p>
-                🟢 RAG disponível
-            </p>
-
-            <p>
-                🟢 Retriever/Reranker disponível
-            </p>
-
-            <p>
-                🟢 Orchestrator carregado
-            </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-        <div class="footer-note">
-            Assistente Jurídico IA ·
-            RAG + Multiagentes + Evidências · V3.1
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
+        st.markdown(
+            """
+            <div class="footer-note">
+                Assistente Jurídico IA ·
+                RAG + Multiagentes + Evidências · V3.1
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 # ============================================================
 # ASSISTENTE IA

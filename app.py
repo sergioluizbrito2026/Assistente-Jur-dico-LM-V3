@@ -724,17 +724,18 @@ if not user:
             </div>
 
             <h1>
-                Assistente Jurídico IA
-            </h1>
-
-            <p style="color:#6c7890;">
-                Inteligência artificial para documentos,
-                riscos, pesquisas e análises jurídicas.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+               st.markdown(
+    """
+    <div style="text-align: center; padding: 20px;">
+        <h1>Assistente Jurídico IA</h1>
+        <p style="color:#6c7890;">
+            Inteligência artificial para documentos,
+            riscos, pesquisas e análises jurídicas.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
     with st.form("login"):
 

@@ -51,6 +51,7 @@ from db import init_db, seed_demo
 
 from services.audit import audit
 
+from services.auth import (
     authenticate,
     get_current_user,
     logout,

@@ -1155,3 +1155,188 @@ elif page == "Documentos":
         """,
         unsafe_allow_html=True,
     )
+
+    # ============================================================
+# GESTÃO DE PROCESSOS (CENTRO DE CONTEXTO DO SISTEMA)
+# ============================================================
+
+elif page == "Processos":
+    
+    # Verifica se o usuário clicou para abrir um processo específico
+    selected_process_id = st.session_state.get("active_process_id", None)
+
+    if selected_process_id:
+        # ========================================================
+        # VISÃO DETALHADA DO PROCESSO SELECIONADO
+        # ========================================================
+        
+        col_back, col_actions = st.columns([4, 1])
+        with col_back:
+            if st.button("← Voltar para a lista de processos"):
+                st.session_state.pop("active_process_id", None)
+                st.rerun()
+        with col_actions:
+            if st.button("⚡ Analisar com IA", type="primary", use_container_width=True):
+                st.session_state.page = "Assistente IA"
+                st.session_state.pending_question = f"Faça uma análise completa e detalhada do {selected_process_id}, cruzando riscos, prazos e documentos."
+                st.rerun()
+
+        st.markdown(f"## ⚖️ PROCESSO {selected_process_id}")
+        st.caption("Cliente: **Cliente A** &middot; Área: **Trabalhista** &middot; Status: **Em andamento**")
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # KPIs Rápidos do Processo
+        pk1, pk2, pk3, pk4 = st.columns(4)
+        with pk1:
+            with st.container(border=True):
+                st.markdown("🔴 **Risco: Alto**")
+        with pk2:
+            with st.container(border=True):
+                st.markdown("⏰ **Próximo prazo: 2 dias**")
+        with pk3:
+            with st.container(border=True):
+                st.markdown("📄 **Documentos: 8**")
+        with pk4:
+            with st.container(border=True):
+                st.markdown("🤖 **Análises IA: 14**")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Abas internas do processo detalhado
+        p_tab1, p_tab2, p_tab3, p_tab4, p_tab5, p_tab6, p_tab7 = st.tabs([
+            "📋 Resumo", "📄 Documentos", "🤖 Análises IA", "⚠️ Riscos", "⏰ Prazos", "📌 Evidências", "📜 Histórico"
+        ])
+
+        with p_tab1:
+            st.markdown("#### Resumo Executivo do Caso")
+            st.markdown(
+                """
+                O presente processo envolve reclamação trabalhista complexa movida em face da empresa, 
+                alegando divergências em verbas rescisórias e horas extras. A base de conhecimento RAG 
+                indexou 8 documentos essenciais para a defesa.
+                """,
+                unsafe_allow_html=True
+            )
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("📝 Solicitar resumo atualizado à IA", key="sum_proc_ia"):
+                st.session_state.page = "Assistente IA"
+                st.session_state.pending_question = f"Gere um resumo executivo atualizado para o {selected_process_id}."
+                st.rerun()
+
+        with p_tab2:
+            st.markdown("#### Documentos Vinculados (8)")
+            st.markdown("- **Petição Inicial.pdf** (Página 1 a 12) — `Indexado no RAG`")
+            st.markdown("- **Contrato de Trabalho.pdf** (Página 1 a 4) — `Indexado no RAG`")
+            st.markdown("- **Cartões de Ponto (Lote 1).pdf** (Página 1 a 35) — `Indexado no RAG`")
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("📤 Adicionar novo documento ao processo", key="add_doc_proc"):
+                st.session_state.page = "Documentos"
+                st.rerun()
+
+        with p_tab3:
+            st.markdown("#### Histórico de Análises Realizadas pela IA (14)")
+            st.markdown("1. **Auditoria de Horas Extras** — Executada em 04/09/2026 (Agente de Risco)")
+            st.markdown("2. **Validação de Verbas Rescisórias** — Executada em 02/09/2026 (Agente Jurídico)")
+            st.markdown("3. **Análise Preliminar da Petição** — Executada em 30/08/2026 (Agente Geral)")
+
+        with p_tab4:
+            st.markdown("#### Riscos Identificados")
+            st.markdown("🔴 **Risco Alto:** Ausência de registro eletrônico de ponto em 3 cartões de frequência.")
+            st.markdown("🟡 **Risco Médio:** Divergência de interpretação sobre o banco de horas acumulado.")
+
+        with p_tab5:
+            st.markdown("#### Prazos Processuais Pendentes")
+            st.markdown("⏰ **Prazo crítico:** Contestação vence em **2 dias** (07/09/2026).")
+            st.markdown("⏰ **Prazo futuro:** Audiência de conciliação marcada para daqui a 15 dias.")
+
+        with p_tab6:
+            st.markdown("#### Evidências Recuperadas via RAG")
+            st.markdown("> *“O controle de jornada anexado apresenta lacunas nos dias 12 a 15 do mês de fevereiro...”* (Fonte: Cartões de Ponto, p. 8)")
+
+        with p_tab7:
+            st.markdown("#### Histórico de Atividades")
+            pages_history = [
+                ("05/09/2026 14:30", "Dr. Sérgio Luiz consultou os riscos do processo."),
+                ("04/09/2026 10:15", "Sistema RAG indexou novos documentos."),
+                ("30/08/2026 09:00", "Processo #2026-0145 cadastrado na base.")
+            ]
+            for data_h, desc_h in pages_history:
+                st.markdown(f"- **{data_h}** — {desc_h}")
+
+    else:
+        # ========================================================
+        # LISTAGEM GERAL DE PROCESSOS
+        # ========================================================
+        
+        st.title("⚖️ Gestão de Processos")
+        st.caption("Central de contexto integrando documentos, RAG, riscos e prazos.")
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Barra de Pesquisa e Filtros
+        f_col1, f_col2 = st.columns([3, 2])
+        with f_col1:
+            search_query = st.text_input("Buscar processo...", placeholder="Digite o número do processo, cliente ou matéria...", label_visibility="collapsed")
+        with f_col2:
+            status_filter = st.selectbox(
+                "Filtro de status",
+                ["Todos", "Ativos", "Em análise", "Concluídos"],
+                label_visibility="collapsed"
+            )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Card do Processo Principal (#2026-0145)
+        with st.container(border=True):
+            pc_col1, pc_col2 = st.columns([3, 1])
+            with pc_col1:
+                st.markdown("### Processo #2026-0145")
+                st.markdown("Cliente: **Cliente A** &middot; Área: **Trabalhista**")
+                st.markdown("Status: **Em andamento** &middot; Risco: <span class='badge-red'>🔴 Alto</span> &middot; Próximo prazo: **2 dias**", unsafe_allow_html=True)
+                st.markdown("<span style='font-size: 0.8rem; color: #64748b;'>📄 8 documentos vinculados &nbsp;|&nbsp; 🤖 14 análises de IA realizadas</span>", unsafe_allow_html=True)
+            with pc_col2:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("Ver processo", key="btn_open_145", use_container_width=True):
+                    st.session_state.active_process_id = "Processo #2026-0145"
+                    st.rerun()
+                if st.button("Analisar com IA", key="btn_ai_145", type="primary", use_container_width=True):
+                    st.session_state.page = "Assistente IA"
+                    st.session_state.pending_question = "Faça uma análise completa do Processo #2026-0145."
+                    st.rerun()
+
+        # Card do Processo Secundário (#2026-0182)
+        with st.container(border=True):
+            pc_col3, pc_col4 = st.columns([3, 1])
+            with pc_col3:
+                st.markdown("### Processo #2026-0182")
+                st.markdown("Cliente: **Beta Participações** &middot; Área: **Societário**")
+                st.markdown("Status: **Em andamento** &middot; Risco: <span class='badge-orange'>🟠 Médio</span> &middot; Próximo prazo: **5 dias**", unsafe_allow_html=True)
+                st.markdown("<span style='font-size: 0.8rem; color: #64748b;'>📄 4 documentos vinculados &nbsp;|&nbsp; 🤖 6 análises de IA realizadas</span>", unsafe_allow_html=True)
+            with pc_col4:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("Ver processo", key="btn_open_182", use_container_width=True):
+                    st.session_state.active_process_id = "Processo #2026-0182"
+                    st.rerun()
+                if st.button("Analisar com IA", key="btn_ai_182", type="primary", use_container_width=True):
+                    st.session_state.page = "Assistente IA"
+                    st.session_state.pending_question = "Faça uma análise completa do Processo #2026-0182."
+                    st.rerun()
+
+        # Card do Processo (#2026-0191)
+        with st.container(border=True):
+            pc_col5, pc_col6 = st.columns([3, 1])
+            with pc_col5:
+                st.markdown("### Processo #2026-0191")
+                st.markdown("Cliente: **Gamma Comércio** &middot; Área: **Contratual**")
+                st.markdown("Status: **Em análise** &middot; Risco: <span class='badge-green'>🟢 Baixo</span> &middot; Próximo prazo: **12 dias**", unsafe_allow_html=True)
+                st.markdown("<span style='font-size: 0.8rem; color: #64748b;'>📄 2 documentos vinculados &nbsp;|&nbsp; 🤖 3 análises de IA realizadas</span>", unsafe_allow_html=True)
+            with pc_col6:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("Ver processo", key="btn_open_191", use_container_width=True):
+                    st.session_state.active_process_id = "Processo #2026-0191"
+                    st.rerun()
+                if st.button("Analisar com IA", key="btn_ai_191", type="primary", use_container_width=True):
+                    st.session_state.page = "Assistente IA"
+                    st.session_state.pending_question = "Faça uma análise completa do Processo #2026-0191."
+                    st.rerun()

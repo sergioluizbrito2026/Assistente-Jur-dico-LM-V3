@@ -1021,10 +1021,10 @@ if page == "Dashboard":
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        st.markdown(
+     st.markdown(
         """
         <div class="section-title">
-            📄 Documentos Recentes
+            &#128196; Documentos Recentes
         </div>
         """,
         unsafe_allow_html=True,
@@ -1055,7 +1055,7 @@ if page == "Dashboard":
                 )
 
                 with c1:
-                    st.markdown("📄")
+                    st.markdown("&#128196;", unsafe_allow_html=True)
 
                 with c2:
                     st.write(

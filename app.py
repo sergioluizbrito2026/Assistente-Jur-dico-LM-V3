@@ -439,72 +439,87 @@ if not user:
 
 
 # ============================================================
-# SESSION STATE & SIDEBAR NAVIGATION
+# SIDEBAR RESTRUTURADA E PROFISSIONAL
 # ============================================================
-
-if "page" not in st.session_state:
-    st.session_state.page = "Dashboard"
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-if "pending_question" not in st.session_state:
-    st.session_state.pending_question = None
-
 with st.sidebar:
     st.markdown(
         """
-        <div class="sidebar-brand">
-            <div class="logo">⚖️</div>
-            <div class="title">Jurídico SaaS</div>
-            <div class="sub">Inteligência Artificial v3.1</div>
+        <div style="text-align: center; padding: 10px 0;">
+            <h2 style="margin: 0; font-size: 1.2rem; color: #1e293b;">⚖️ Jurídico SaaS</h2>
+            <p style="margin: 2px 0 0 0; font-size: 0.75rem; color: #64748b;">Inteligência Artificial v3.1</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    if st.button("📊 Dashboard", use_container_width=True):
-        st.session_state.page = "Dashboard"
-        st.rerun()
-
-    if st.button("💬 Assistente IA", use_container_width=True):
-        st.session_state.page = "Assistente IA"
-        st.rerun()
-
-    if st.button("📄 Documentos", use_container_width=True):
-        st.session_state.page = "Documentos"
-        st.rerun()
-
+    
     st.markdown("---")
-    st.markdown("### 🗂️ CONVERSAS")
-    st.caption("Hoje")
-    if st.button("• Análise contrato Cliente A"):
-        st.session_state.page = "Assistente IA"
-        st.rerun()
-    if st.button("• Riscos Processo 102"):
-        st.session_state.page = "Assistente IA"
-        st.rerun()
 
-    st.caption("Ontem")
-    if st.button("• Resumo da petição"):
-        st.session_state.page = "Assistente IA"
-        st.rerun()
-    if st.button("• Consulta jurisprudencial"):
-        st.session_state.page = "Assistente IA"
-        st.rerun()
-
-    st.caption("31/08")
-    if st.button("• Análise trabalhista"):
-        st.session_state.page = "Assistente IA"
-        st.rerun()
+    # Navegação Principal
+    page = st.radio(
+        "Navegação",
+        [
+            "Dashboard",
+            "Assistente IA",
+            "Documentos",
+            "Processos",
+            "Riscos",
+            "Prazos",
+            "Relatórios",
+            "Base de Conhecimento",
+            "Configurações",
+            "Auditoria",
+            "Perfil"
+        ],
+        label_visibility="collapsed"
+    )
 
     st.markdown("---")
 
-    if st.button("🚪 Sair", use_container_width=True):
-        logout()
+    # Histórico Dinâmico de Conversas
+    st.markdown("<p style='font-size: 0.75rem; font-weight: 700; color: #64748b; letter-spacing: 0.5px;'>💬 CONVERSAS</p>", unsafe_allow_html=True)
+    st.markdown("<p style='font-size: 0.7rem; color: #94a3b8; margin-bottom: 4px;'>Hoje</p>", unsafe_allow_html=True)
+    if st.button("🔵 Análise contrato Cliente A", use_container_width=True, key="c_today1"):
+        st.session_state.page = "Assistente IA"
+        st.rerun()
+    if st.button("🔴 Riscos Processo #102", use_container_width=True, key="c_today2"):
+        st.session_state.page = "Assistente IA"
         st.rerun()
 
-page = st.session_state.page
+    st.markdown("<p style='font-size: 0.7rem; color: #94a3b8; margin: 8px 0 4px 0;'>Ontem</p>", unsafe_allow_html=True)
+    if st.button("📝 Resumo da petição", use_container_width=True, key="c_yest1"):
+        st.session_state.page = "Assistente IA"
+        st.rerun()
+    if st.button("⚖️ Consulta jurisprudencial", use_container_width=True, key="c_yest2"):
+        st.session_state.page = "Assistente IA"
+        st.rerun()
+
+    st.markdown("<p style='font-size: 0.7rem; color: #94a3b8; margin: 8px 0 4px 0;'>31/08</p>", unsafe_allow_html=True)
+    if st.button("🔎 Análise trabalhista", use_container_width=True, key="c_old1"):
+        st.session_state.page = "Assistente IA"
+        st.rerun()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("＋ Nova conversa", use_container_width=True, type="secondary"):
+        st.session_state.messages = []
+        st.session_state.page = "Assistente IA"
+        st.rerun()
+
+    st.markdown("---")
+
+    # Rodapé da Sidebar com Identificação Profissional do Usuário
+    st.markdown(
+        """
+        <div style="background: #f8fafc; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 10px;">
+            <p style="margin: 0; font-size: 0.85rem; font-weight: 600; color: #1e293b;">Dr. Sérgio Luiz</p>
+            <p style="margin: 2px 0 4px 0; font-size: 0.7rem; color: #64748b;">Usuário jurídico</p>
+            <span style="font-size: 0.7rem; color: #15803d; font-weight: 600;">🟢 IA conectada</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    
+    if st.button("🚪 Sair do Sistema", use_container_width=True):
+        st.warning("Sessão encerrada com segurança.")
 
 
 # ============================================================

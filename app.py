@@ -1094,7 +1094,7 @@ if page == "Dashboard":
             """
             <div class="card">
                 <div class="section-title">
-                    🛡️ Análise de Risco IA
+                     Análise de Risco IA
                 </div>
                 <div style="
                     font-size:3rem;

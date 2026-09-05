@@ -1184,18 +1184,15 @@ if page == "Dashboard":
 elif page == "Assistente IA":
 
     st.markdown(
-        """
-        <div class="hero">
-            <h1>Assistente Juridico IA</h1>
-            <p>
-                Analise documentos, consulte sua base juridica
-                e obtenha respostas fundamentadas em evidencias.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
+            """
+            <div class="footer-note">
+                Assistente Juridico IA -
+                RAG + Multiagentes + Evidencias - V3.1
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+  
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Historico

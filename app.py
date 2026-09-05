@@ -509,7 +509,9 @@ page = st.session_state.page
 # DASHBOARD
 # ============================================================
 
-if page == "Dashboard":
+elif page == "Dashboard":
+    import plotly.express as px
+
     st.title("⚖️ JURÍDICO SaaS")
     st.caption("Inteligência Artificial v3.1 — Painel de Controle Consolidado")
     st.markdown("<br>", unsafe_allow_html=True)
@@ -585,20 +587,46 @@ if page == "Dashboard":
     st.markdown('<div class="section-title">📊 Visão Geral & Estatísticas</div>', unsafe_allow_html=True)
     g1, g2, g3 = st.columns(3)
 
+    # Configuração comum para travar o zoom, scroll e barra de ferramentas do Plotly
+    plotly_config = {
+        "staticPlot": True  # Torna o gráfico totalmente estático, bloqueando qualquer movimento do mouse
+    }
+
     with g1:
         with st.container(border=True):
             st.markdown("**Casos por Status**")
-            st.bar_chart({"Ativo": 18, "Em análise": 10, "Em andamento": 7, "Concluído": 5, "Arquivado": 2})
+            fig1 = px.bar(
+                x=["Ativo", "Em análise", "Em andamento", "Concluído", "Arquivado"],
+                y=[18, 10, 7, 5, 2],
+                labels={"x": "Status", "y": "Quantidade"}
+            )
+            fig1.update_layout(xaxis=dict(fixedrange=True), yaxis=dict(fixedrange=True), margin=dict(t=20, b=20, l=20, r=20))
+            st.plotly_chart(fig1, use_container_width=True, config=plotly_config)
 
     with g2:
         with st.container(border=True):
             st.markdown("**Riscos Identificados**")
-            st.bar_chart({"Alto": 7, "Médio": 12, "Baixo": 8})
+            # Ordem lógica corrigida: Baixo -> Médio -> Alto
+            fig2 = px.bar(
+                x=["Baixo", "Médio", "Alto"],
+                y=[8, 12, 7],
+                labels={"x": "Nível de Risco", "y": "Quantidade"}
+            )
+            fig2.update_layout(xaxis=dict(fixedrange=True), yaxis=dict(fixedrange=True), margin=dict(t=20, b=20, l=20, r=20))
+            st.plotly_chart(fig2, use_container_width=True, config=plotly_config)
 
     with g3:
         with st.container(border=True):
             st.markdown("**Atividade da IA (Semanal)**")
-            st.line_chart({"Seg": 45, "Ter": 68, "Qua": 82, "Qui": 55, "Sex": 90})
+            # Ordem cronológica dos dias
+            fig3 = px.line(
+                x=["Seg", "Ter", "Qua", "Qui", "Sex"],
+                y=[45, 68, 82, 55, 90],
+                markers=True,
+                labels={"x": "Dia", "y": "Atividades"}
+            )
+            fig3.update_layout(xaxis=dict(fixedrange=True), yaxis=dict(fixedrange=True), margin=dict(t=20, b=20, l=20, r=20))
+            st.plotly_chart(fig3, use_container_width=True, config=plotly_config)
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(

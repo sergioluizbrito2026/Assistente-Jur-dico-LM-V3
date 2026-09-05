@@ -1094,33 +1094,25 @@ if page == "Dashboard":
             """
             <div class="card">
                 <div class="section-title">
-                     Análise de Risco IA
+                    Analise de Risco IA
                 </div>
-                <div style="
-                    font-size:3rem;
-                    font-weight:800;
-                    text-align:center;
-                    margin:1rem 0;
-                ">
+                <div style="font-size:3rem; font-weight:800; text-align:center; margin:1rem 0;">
                     IA
                 </div>
-                <div style="
-                    text-align:center;
-                    color:#6c7890;
-                ">
-                    análise disponível
+                <div style="text-align:center; color:#6c7890;">
+                    analise disponivel
                 </div>
                 <hr>
                 <div>
-                    🔴 Alto risco
+                    Alto risco
                     <b style="float:right;">—</b>
                 </div>
                 <div>
-                    🟠 Médio risco
+                    Medio risco
                     <b style="float:right;">—</b>
                 </div>
                 <div>
-                    🟢 Baixo risco
+                    Baixo risco
                     <b style="float:right;">—</b>
                 </div>
             </div>
@@ -1134,16 +1126,16 @@ if page == "Dashboard":
             """
             <div class="card">
                 <div class="section-title">
-                    ⚖️ Pesquisas Jurídicas Recentes
+                    Pesquisas Juridicas Recentes
                 </div>
                 <p>
-                    <b>Jurisprudência sobre danos morais</b>
+                    <b>Jurisprudencia sobre danos morais</b>
                     <br>
                     <small>Fonte a consultar</small>
                 </p>
                 <hr>
                 <p>
-                    <b>Prazo para interposição de recurso</b>
+                    <b>Prazo para interposicao de recurso</b>
                     <br>
                     <small>Fonte a consultar</small>
                 </p>
@@ -1164,12 +1156,12 @@ if page == "Dashboard":
             """
             <div class="card">
                 <div class="section-title">
-                    🔎 Status da Plataforma
+                    Status da Plataforma
                 </div>
-                <p>🟢 Banco de dados operacional</p>
-                <p>🟢 RAG disponível</p>
-                <p>🟢 Retriever/Reranker disponível</p>
-                <p>🟢 Orchestrator carregado</p>
+                <p>Banco de dados operacional</p>
+                <p>RAG disponivel</p>
+                <p>Retriever/Reranker disponivel</p>
+                <p>Orchestrator carregado</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1178,8 +1170,8 @@ if page == "Dashboard":
         st.markdown(
             """
             <div class="footer-note">
-                Assistente Jurídico IA ·
-                RAG + Multiagentes + Evidências · V3.1
+                Assistente Juridico IA ·
+                RAG + Multiagentes + Evidencias · V3.1
             </div>
             """,
             unsafe_allow_html=True,

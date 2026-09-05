@@ -25,6 +25,8 @@ from services.rag_pipeline import rag_answer, retrieve_and_rerank
 from services.ai_orchestrator import orchestrate, risk_analysis
 from services.auth import authenticate, get_current_user, logout
 from services.ingestion import ingest_document
+import plotly.express as px
+
 
 
 # ============================================================
@@ -510,7 +512,6 @@ page = st.session_state.page
 # ============================================================
 
 elif page == "Dashboard":
-    import plotly.express as px
 
     st.title("⚖️ JURÍDICO SaaS")
     st.caption("Inteligência Artificial v3.1 — Painel de Controle Consolidado")

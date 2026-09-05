@@ -1,4 +1,3 @@
-```python
 """
 Assistente Jurídico SaaS IA V3.1
 services/auth.py
@@ -370,4 +369,3 @@ if __name__ == "__main__":
         f"Funções ausentes: "
         f"{result['missing_functions']}"
     )
-```

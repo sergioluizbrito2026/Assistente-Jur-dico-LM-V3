@@ -2350,7 +2350,7 @@ elif page == "Configurações":
         <div class="hero">
 
             <h1>
-                ⚙️ Configurações
+                &#9881;&#65039; Configurações
             </h1>
 
             <p>
@@ -2370,7 +2370,7 @@ elif page == "Configurações":
     with c1:
 
         st.markdown(
-            "### 🤖 Inteligência Artificial"
+            "### &#129302; Inteligência Artificial"
         )
 
         llm = st.selectbox(
@@ -2399,7 +2399,7 @@ elif page == "Configurações":
     with c2:
 
         st.markdown(
-            "### 🛡️ Segurança"
+            "### &#128737;&#65039; Segurança"
         )
 
         citations_required = st.checkbox(
@@ -2418,7 +2418,7 @@ elif page == "Configurações":
         )
 
     st.markdown(
-        "### 🧠 Agentes"
+        "### &#129488; Agentes"
     )
 
     agents = [

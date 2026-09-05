@@ -802,25 +802,15 @@ File "/mount/src/assistente-jur-dico-lm-v3/app.py", line 808
 SyntaxError: invalid character '⚖' (U+2696)
 
 
+
 # ============================================================
 # DASHBOARD
 # ============================================================
 
 if page == "Dashboard":
 
-    st.markdown(
-        """
-        <div class="hero">
-            <h1>
-                Olá, Dr. 👋
-            </h1>
-            <p>
-                Como posso ajudar você hoje?
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.title("Olá, Dr. 👋")
+    st.markdown("### Como posso ajudar você hoje?")
 
     st.markdown("<br>", unsafe_allow_html=True)
 

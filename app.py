@@ -24,6 +24,7 @@ from services.documents import list_documents
 from services.evaluation import evaluate_answer
 from services.rag_pipeline import rag_answer, retrieve_and_rerank
 from services.ai_orchestrator import orchestrate, risk_analysis
+from services.auth import authenticate, get_current_user, logout
 
 
 # ============================================================

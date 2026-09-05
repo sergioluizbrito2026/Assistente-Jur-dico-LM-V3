@@ -1084,7 +1084,7 @@ if page == "Dashboard":
             f"Erro ao carregar documentos: {exc}"
         )
 
-    # ============================================================
+   # ============================================================
     # LATERAL DASHBOARD
     # ============================================================
 
@@ -2442,125 +2442,10 @@ elif page == "Configurações":
 
             st.markdown(
                 f"""
-                <div class="card">
-
+                <div class="card" style="text-align: center; padding: 10px;">
                     <b>{name}</b>
-
-                    <br>
-
-                    <span class="status-ok">
-                        ● Ativo
-                    </span>
-
+                    <p style="color: green; margin: 0;">Ativo</p>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-
-    st.success(
-        f"Configuração atual: "
-        f"LLM={llm} · "
-        f"Top-K={top_k} · "
-        f"Reranker={rerank_k}"
-    )
-
-
-# ============================================================
-# AJUDA
-# ============================================================
-
-elif page == "Ajuda":
-
-    st.markdown(
-        """
-        <div class="hero">
-
-            <h1>
-                ❓ Ajuda
-            </h1>
-
-            <p>
-                Como utilizar o Assistente Jurídico IA.
-            </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-        ### Fluxo recomendado
-
-        1. Envie o documento em **Documentos**.
-        2. Aguarde a ingestão e indexação.
-        3. Vá para **Assistente IA**.
-        4. Faça perguntas sobre o documento.
-        5. Confira **evidências, páginas e citações**.
-        6. Use **Análise de Risco** para contratos.
-        7. Use **Base Vetorial** para verificar o Retriever/Reranker.
-        8. Use **Avaliação RAG** para medir a qualidade da resposta.
-
-        ### Pipeline
-
-        **Documento**
-
-        ↓
-
-        **Ingestão**
-
-        ↓
-
-        **OCR**
-
-        ↓
-
-        **Chunking**
-
-        ↓
-
-        **Embeddings**
-
-        ↓
-
-        **FAISS**
-
-        ↓
-
-        **Retriever**
-
-        ↓
-
-        **Reranker**
-
-        ↓
-
-        **Guard Agent**
-
-        ↓
-
-        **AI Orchestrator**
-
-        ↓
-
-        **LLM**
-
-        ↓
-
-        **Citações**
-
-        ↓
-
-        **Evaluation**
-        """
-    )
-
-
-# ============================================================
-# FALLBACK
-# ============================================================
-
-else:
-
-    st.session_state.page = "Dashboard"
-    st.rerun()

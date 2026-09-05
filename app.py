@@ -814,19 +814,15 @@ if page == "Dashboard":
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --------------------------------------------------------
+   # ============================================================
     # MÉTRICAS REAIS
-    # --------------------------------------------------------
+    # ============================================================
 
     try:
-
         from db import get_connection
 
         with get_connection() as c:
-
-            org_id = user.get(
-                "organization_id"
-            )
+            org_id = user.get("organization_id")
 
             documents_count = c.execute(
                 """
@@ -865,72 +861,39 @@ if page == "Dashboard":
             ).fetchone()[0]
 
     except Exception:
-
         documents_count = 0
         cases_count = 0
         chunks_count = 0
         audit_count = 0
 
     metrics = [
-        (
-            "▣",
-            "Processos",
-            str(cases_count),
-            "registros",
-        ),
-        (
-            "□",
-            "Documentos",
-            str(documents_count),
-            "indexados",
-        ),
-        (
-            "⌕",
-            "Chunks",
-            str(chunks_count),
-            "na base vetorial",
-        ),
-        (
-            "◈",
-            "Eventos",
-            str(audit_count),
-            "auditoria",
-        ),
+        ("▣", "Processos", str(cases_count), "registros"),
+        ("□", "Documentos", str(documents_count), "indexados"),
+        ("⌕", "Chunks", str(chunks_count), "na base vetorial"),
+        ("◈", "Eventos", str(audit_count), "auditoria"),
     ]
 
     cols = st.columns(4)
 
-    for col, metric in zip(
-        cols,
-        metrics,
-    ):
-
+    for col, metric in zip(cols, metrics):
         icon, label, value, trend = metric
 
         with col:
-
             st.markdown(
                 f"""
                 <div class="metric-card">
-
-                    <div style="
-                        font-size:1.25rem;
-                    ">
+                    <div style="font-size:1.25rem;">
                         {icon}
                     </div>
-
                     <div class="metric-label">
                         {label}
                     </div>
-
                     <div class="metric-value">
                         {value}
                     </div>
-
                     <div class="metric-trend">
                         {trend}
                     </div>
-
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -938,9 +901,7 @@ if page == "Dashboard":
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    left, right = st.columns(
-        [2.1, 1]
-    )
+    left, right = st.columns([2.1, 1])
 
     # --------------------------------------------------------
     # CENTRAL

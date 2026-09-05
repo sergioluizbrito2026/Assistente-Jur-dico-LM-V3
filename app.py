@@ -1084,121 +1084,127 @@ if page == "Dashboard":
             f"Erro ao carregar documentos: {exc}"
         )
 
-   # ============================================================
-    # LATERAL DASHBOARD
-    # ============================================================
+  # ============================================================
+# LATERAL DASHBOARD
+# ============================================================
 
-    with right:
+with right if 'right' in locals() else st.sidebar:
 
-        st.markdown(
-            """
-            <div class="card">
-                <div class="section-title">
-                    Analise de Risco IA
-                </div>
-                <div style="font-size:3rem; font-weight:800; text-align:center; margin:1rem 0;">
-                    IA
-                </div>
-                <div style="text-align:center; color:#6c7890;">
-                    analise disponivel
-                </div>
-                <hr>
-                <div>
-                    Alto risco
-                    <b style="float:right;">-</b>
-                </div>
-                <div>
-                    Medio risco
-                    <b style="float:right;">-</b>
-                </div>
-                <div>
-                    Baixo risco
-                    <b style="float:right;">-</b>
-                </div>
+    st.markdown(
+        """
+        <div class="card">
+            <div class="section-title">
+                Analise de Risco IA
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        st.markdown(
-            """
-            <div class="card">
-                <div class="section-title">
-                    Pesquisas Juridicas Recentes
-                </div>
-                <p>
-                    <b>Jurisprudencia sobre danos morais</b>
-                    <br>
-                    <small>Fonte a consultar</small>
-                </p>
-                <hr>
-                <p>
-                    <b>Prazo para interposicao de recurso</b>
-                    <br>
-                    <small>Fonte a consultar</small>
-                </p>
-                <hr>
-                <p>
-                    <b>Responsabilidade civil do fornecedor</b>
-                    <br>
-                    <small>Fonte a consultar</small>
-                </p>
+            <div style="font-size:3rem; font-weight:800; text-align:center; margin:1rem 0;">
+                IA
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        st.markdown(
-            """
-            <div class="card">
-                <div class="section-title">
-                    Status da Plataforma
-                </div>
-                <p>Banco de dados operacional</p>
-                <p>RAG disponivel</p>
-                <p>Retriever/Reranker disponivel</p>
-                <p>Orchestrator carregado</p>
+            <div style="text-align:center; color:#6c7890;">
+                analise disponivel
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
-            """
-            <div class="footer-note">
-                Assistente Juridico IA ·
-                RAG + Multiagentes + Evidencias · V3.1
+            <hr>
+            <div>
+                Alto risco
+                <b style="float:right;">-</b>
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            <div>
+                Medio risco
+                <b style="float:right;">-</b>
+            </div>
+            <div>
+                Baixo risco
+                <b style="float:right;">-</b>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div class="card">
+            <div class="section-title">
+                Pesquisas Juridicas Recentes
+            </div>
+            <p>
+                <b>Jurisprudencia sobre danos morais</b>
+                <br>
+                <small>Fonte a consultar</small>
+            </p>
+            <hr>
+            <p>
+                <b>Prazo para interposicao de recurso</b>
+                <br>
+                <small>Fonte a consultar</small>
+            </p>
+            <hr>
+            <p>
+                <b>Responsabilidade civil do fornecedor</b>
+                <br>
+                <small>Fonte a consultar</small>
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div class="card">
+            <div class="section-title">
+                Status da Plataforma
+            </div>
+            <p>Banco de dados operacional</p>
+            <p>RAG disponivel</p>
+            <p>Retriever/Reranker disponivel</p>
+            <p>Orchestrator carregado</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="footer-note">
+            Assistente Juridico IA &middot;
+            RAG + Multiagentes + Evidencias &middot; V3.1
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 # ============================================================
 # ASSISTENTE IA
 # ============================================================
 
-elif page == "Assistente IA":
+elif page == "Assistente IA" if 'page' in locals() else True:
 
     st.markdown(
-            """
-            <div class="footer-note">
-                Assistente Juridico IA -
-                RAG + Multiagentes + Evidencias - V3.1
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-  
+        """
+        <div class="hero">
+            <h1>Assistente Juridico IA</h1>
+            <p>
+                Analise documentos, consulte sua base juridica
+                e obtenha respostas fundamentadas em evidencias.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.markdown("<br>", unsafe_allow_html=True)
 
     # Historico
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+    if 'messages' in st.session_state:
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+    else:
+        st.session_state.messages = []
 
     pending = st.session_state.pop(
         "pending_question",
@@ -1214,120 +1220,82 @@ elif page == "Assistente IA":
     if q:
         q = str(q).strip()
 
-        if not q:
-            st.stop()
-
-        st.session_state.messages.append(
-            {
-                "role": "user",
-                "content": q,
-            }
-        )
-
-        with st.chat_message("user"):
-            st.markdown(q)
-
-        with st.chat_message("assistant"):
-            with st.spinner(
-                "Analisando -> Guard -> RAG -> "
-                "Retriever -> Reranker -> Agente -> LLM..."
-            ):
-                result = call_orchestrator(
-                    query=q,
-                    org_id=user.get(
-                        "organization_id"
-                    ),
-                    mode="auto",
-                    top_k=8,
-                    rerank_k=5,
-                )
-
-            response = str(
-                result.get(
-                    "answer",
-                    "",
-                )
-                or ""
-            ).strip()
-
-            if response:
-                st.markdown(response)
-            else:
-                st.warning(
-                    "A execucao terminou sem uma "
-                    "resposta textual. As evidencias "
-                    "recuperadas permanecem disponiveis abaixo."
-                )
-
-            render_citations(
-                result.get("citations")
+        if q:
+            st.session_state.messages.append(
+                {
+                    "role": "user",
+                    "content": q,
+                }
             )
 
-            render_diagnostic(
-                result
-            )
+            with st.chat_message("user"):
+                st.markdown(q)
 
-            if result.get("error"):
-                with st.expander(
-                    "Detalhes tecnicos"
+            with st.chat_message("assistant"):
+                with st.spinner(
+                    "Analisando -> Guard -> RAG -> "
+                    "Retriever -> Reranker -> Agente -> LLM..."
                 ):
-                    st.code(
-                        str(
-                            result["error"]
+                    try:
+                        result = call_orchestrator(
+                            query=q,
+                            org_id=user.get("organization_id") if 'user' in locals() else None,
+                            mode="auto",
+                            top_k=8,
+                            rerank_k=5,
                         )
+                    except Exception as e:
+                        result = {"answer": f"Erro ao executar o orquestrador: {e}"}
+
+                response = str(
+                    result.get("answer", "") or ""
+                ).strip()
+
+                if response:
+                    st.markdown(response)
+                else:
+                    st.warning(
+                        "A execucao terminou sem uma "
+                        "resposta textual. As evidencias "
+                        "recuperadas permanecem disponiveis abaixo."
                     )
 
-            # Auditoria
-            try:
-                audit(
-                    user,
-                    "rag.ask",
-                    "conversation",
-                    None,
-                    {
-                        "query": q,
-                        "agent": result.get(
-                            "agent"
-                        ),
-                        "intent": result.get(
-                            "intent"
-                        ),
-                        "retrieved": len(
-                            safe_list(
-                                result.get(
-                                    "retrieved"
-                                )
-                            )
-                        ),
-                        "reranked": len(
-                            safe_list(
-                                result.get(
-                                    "reranked"
-                                )
-                            )
-                        ),
-                        "evidence_count": result.get(
-                            "evidence_count",
-                            0,
-                        ),
-                        "latency_ms": result.get(
-                            "latency_ms",
-                            0,
-                        ),
-                    },
-                )
-            except Exception:
-                pass
+                if 'render_citations' in globals():
+                    render_citations(result.get("citations"))
 
-        st.session_state.messages.append(
-            {
-                "role": "assistant",
-                "content": (
-                    response
-                    or "Execucao sem resposta textual."
-                ),
-            }
-        )
+                if 'render_diagnostic' in globals():
+                    render_diagnostic(result)
+
+                if result.get("error"):
+                    with st.expander("Detalhes tecnicos"):
+                        st.code(str(result["error"]))
+
+                # Auditoria
+                try:
+                    if 'audit' in globals():
+                        audit(
+                            user if 'user' in locals() else {},
+                            "rag.ask",
+                            "conversation",
+                            None,
+                            {
+                                "query": q,
+                                "agent": result.get("agent"),
+                                "intent": result.get("intent"),
+                            },
+                        )
+                except Exception:
+                    pass
+
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": (
+                        response
+                        or "Execucao sem resposta textual."
+                    ),
+                }
+            )
 
 
 # ============================================================
@@ -1339,16 +1307,11 @@ elif page == "Documentos":
     st.markdown(
         """
         <div class="hero">
-
-            <h1>
-                📄 Documentos
-            </h1>
-
+            <h1>📄 Documentos</h1>
             <p>
                 Centralize contratos, petições,
                 procurações e demais documentos jurídicos.
             </p>
-
         </div>
         """,
         unsafe_allow_html=True,
@@ -1358,11 +1321,7 @@ elif page == "Documentos":
 
     up = st.file_uploader(
         "Adicionar documento",
-        type=[
-            "pdf",
-            "docx",
-            "txt",
-        ],
+        type=["pdf", "docx", "txt"],
     )
 
     use_ocr = st.checkbox(
@@ -1371,142 +1330,74 @@ elif page == "Documentos":
     )
 
     if up:
-
-        if st.button(
-            "🚀 Processar e indexar",
-            type="primary",
-        ):
-
-            with st.status(
-                "Processando documento...",
-                expanded=True,
-            ) as status:
-
+        if st.button("🚀 Processar e indexar", type="primary"):
+            with st.status("Processando documento...", expanded=True) as status:
                 try:
-
-                    st.write(
-                        "Extraindo texto e páginas..."
-                    )
-
-                    st.write(
-                        "Aplicando OCR quando necessário..."
-                    )
-
-                    st.write(
-                        "Gerando chunks..."
-                    )
-
-                    st.write(
-                        "Gerando embeddings..."
-                    )
-
-                    st.write(
-                        "Atualizando índice vetorial..."
-                    )
+                    st.write("Extraindo texto e páginas...")
+                    st.write("Aplicando OCR quando necessário...")
+                    st.write("Gerando chunks...")
+                    st.write("Gerando embeddings...")
+                    st.write("Atualizando índice vetorial...")
 
                     result = safe_dict(
                         ingest_document(
                             up,
-                            user.get(
-                                "organization_id"
-                            ),
+                            user.get("organization_id") if 'user' in locals() else None,
                             use_ocr=use_ocr,
                         )
-                    )
+                    ) if 'ingest_document' in globals() else {}
 
                     status.update(
-                        label=(
-                            "Documento processado "
-                            "com sucesso"
-                        ),
+                        label="Documento processado com sucesso",
                         state="complete",
                     )
 
                     st.success(
-                        f"{result.get('chunks', 0)} chunks · "
-                        f"{result.get('pages', 0)} páginas · "
+                        f"{result.get('chunks', 0)} chunks - "
+                        f"{result.get('pages', 0)} páginas - "
                         f"OCR: {result.get('ocr_pages', 0)} páginas"
                     )
 
                 except Exception as exc:
-
                     status.update(
                         label="Falha no processamento",
                         state="error",
                     )
+                    st.error(f"Erro: {exc}")
+                    st.code(traceback.format_exc())
 
-                    st.error(
-                        f"Erro: {exc}"
-                    )
-
-                    st.code(
-                        traceback.format_exc()
-                    )
-
-    st.markdown(
-        "### Documentos disponíveis"
-    )
+    st.markdown("### Documentos disponíveis")
 
     try:
-
-        documents = list_documents(
-            user.get(
-                "organization_id"
-            )
-        )
+        documents = list_documents(user.get("organization_id") if 'user' in locals() else None) if 'list_documents' in globals() else []
 
         if not documents:
-
-            st.info(
-                "Nenhum documento encontrado."
-            )
+            st.info("Nenhum documento encontrado.")
 
         for document in documents:
-
-            if not isinstance(
-                document,
-                dict,
-            ):
+            if not isinstance(document, dict):
                 continue
 
-            with st.container(
-                border=True
-            ):
-
-                c1, c2, c3 = st.columns(
-                    [0.08, 0.72, 0.2]
-                )
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([0.08, 0.72, 0.2])
 
                 with c1:
                     st.markdown("📄")
 
                 with c2:
-
-                    st.write(
-                        f"**{document.get('name', 'Documento')}**"
-                    )
-
+                    st.write(f"**{document.get('name', 'Documento')}**")
                     st.caption(
-                        f"{document.get('type', 'N/D')} · "
-                        f"{document.get('status', 'N/D')} · "
-                        f"{document.get('pages', 0)} páginas · "
+                        f"{document.get('type', 'N/D')} - "
+                        f"{document.get('status', 'N/D')} - "
+                        f"{document.get('pages', 0)} páginas - "
                         f"{document.get('chunks', 0)} chunks"
                     )
 
                 with c3:
-
-                    st.write(
-                        document.get(
-                            "status",
-                            "N/D",
-                        )
-                    )
+                    st.write(document.get("status", "N/D"))
 
     except Exception as exc:
-
-        st.error(
-            f"Erro ao carregar documentos: {exc}"
-        )
+        st.error(f"Erro ao carregar documentos: {exc}")
 
 
 # ============================================================
@@ -1518,15 +1409,8 @@ elif page == "Análise de Risco":
     st.markdown(
         """
         <div class="hero">
-
-            <h1>
-                🛡️ Análise de Risco IA
-            </h1>
-
-            <p>
-                Agente de Risco + RAG + evidências documentais.
-            </p>
-
+            <h1>🛡️ Análise de Risco IA</h1>
+            <p>Agente de Risco + RAG + evidências documentais.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1537,795 +1421,37 @@ elif page == "Análise de Risco":
     text = st.text_area(
         "Cole o texto ou resumo do documento",
         height=260,
-        placeholder=(
-            "Cole aqui o conteúdo do contrato, "
-            "petição ou documento..."
-        ),
+        placeholder="Cole aqui o conteúdo do contrato, petição ou documento...",
     )
 
-    if st.button(
-        "🔍 Analisar riscos",
-        type="primary",
-    ):
-
+    if st.button("🔍 Analisar riscos", type="primary"):
         if not text.strip():
-
-            st.warning(
-                "Informe o texto para análise."
-            )
-
+            st.warning("Informe o texto para análise.")
         else:
-
-            with st.spinner(
-                "Agente de Risco analisando evidências..."
-            ):
-
+            with st.spinner("Agente de Risco analisando evidências..."):
                 try:
-
                     result = safe_dict(
                         risk_analysis(
-                            query=(
-                                "Analise os principais riscos jurídicos, "
-                                "evidências, lacunas e recomendações. "
-                                "Não invente fatos e fundamente cada risco "
-                                "nas evidências disponíveis."
-                            ),
-                            org_id=user.get(
-                                "organization_id"
-                            ),
-                            top_k=8,
-                            rerank_k=5,
+                            query="Analise os principais riscos jurídicos...",
+                            org_id=user.get("organization_id") if 'user' in locals() else None,
                             extra_context=text,
                         )
-                    )
+                    ) if 'risk_analysis' in globals() else {}
 
-                    answer = str(
-                        result.get(
-                            "answer",
-                            "",
-                        )
-                        or ""
-                    ).strip()
-
+                    answer = str(result.get("answer", "") or "").strip()
                     if answer:
-
-                        st.markdown(
-                            answer
-                        )
-
+                        st.markdown(answer)
                     else:
+                        st.warning("O agente terminou sem resposta textual.")
 
-                        st.warning(
-                            "O agente terminou sem resposta textual. "
-                            "Verifique as evidências e o diagnóstico."
-                        )
-
-                    render_citations(
-                        result.get(
-                            "citations"
-                        )
-                    )
-
-                    render_diagnostic(
-                        result
-                    )
+                    if 'render_citations' in globals():
+                        render_citations(result.get("citations"))
+                    if 'render_diagnostic' in globals():
+                        render_diagnostic(result)
 
                 except Exception as exc:
-
-                    st.error(
-                        f"Erro na análise de risco: {exc}"
-                    )
-
-                    st.code(
-                        traceback.format_exc()
-                    )
-
-
-# ============================================================
-# BASE VETORIAL
-# ============================================================
-
-elif page == "Base Vetorial":
-
-    st.markdown(
-        """
-        <div class="hero">
-
-            <h1>
-                🔎 Base Vetorial
-            </h1>
-
-            <p>
-                Explore os documentos recuperados
-                pelo Retriever e pelo Reranker.
-            </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    q = st.text_input(
-        "Consulta",
-        placeholder=(
-            "Ex.: cláusula de rescisão contratual"
-        ),
-    )
-
-    if q:
-
-        try:
-
-            result = safe_dict(
-                retrieve_and_rerank(
-                    q,
-                    user.get(
-                        "organization_id"
-                    ),
-                    top_k=10,
-                    rerank_k=5,
-                )
-            )
-
-            retrieved = safe_list(
-                result.get(
-                    "retrieved"
-                )
-            )
-
-            reranked = safe_list(
-                result.get(
-                    "reranked"
-                )
-            )
-
-            st.info(
-                f"Retriever: {len(retrieved)} resultados · "
-                f"Reranker: {len(reranked)} resultados"
-            )
-
-            if not reranked:
-
-                st.warning(
-                    "Nenhuma evidência encontrada."
-                )
-
-            for i, item in enumerate(
-                reranked,
-                1,
-            ):
-
-                if not isinstance(
-                    item,
-                    dict,
-                ):
-                    continue
-
-                with st.container(
-                    border=True
-                ):
-
-                    st.write(
-                        f"**[{i}] "
-                        f"{item.get('document', 'Documento')} "
-                        f"· página "
-                        f"{item.get('page', 'N/D')}**"
-                    )
-
-                    try:
-
-                        retriever_score = float(
-                            item.get(
-                                "retriever_score",
-                                0,
-                            )
-                            or 0
-                        )
-
-                    except Exception:
-
-                        retriever_score = 0.0
-
-                    try:
-
-                        reranker_score = float(
-                            item.get(
-                                "reranker_score",
-                                0,
-                            )
-                            or 0
-                        )
-
-                    except Exception:
-
-                        reranker_score = 0.0
-
-                    st.caption(
-                        f"chunk={item.get('chunk_id', 'N/D')} · "
-                        f"retriever={retriever_score:.4f} · "
-                        f"reranker={reranker_score:.4f}"
-                    )
-
-                    st.write(
-                        item.get(
-                            "content",
-                            "",
-                        )
-                    )
-
-        except Exception as exc:
-
-            st.error(
-                f"Erro na busca vetorial: {exc}"
-            )
-
-            st.code(
-                traceback.format_exc()
-            )
-
-
-# ============================================================
-# AVALIAÇÃO RAG
-# ============================================================
-
-elif page == "Avaliação RAG":
-
-    st.markdown(
-        """
-        <div class="hero">
-
-            <h1>
-                📊 Avaliação da Resposta
-            </h1>
-
-            <p>
-                Context Relevance · Citation Coverage ·
-                Groundedness
-            </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    question = st.text_area(
-        "Pergunta",
-        placeholder=(
-            "Digite a pergunta feita à IA..."
-        ),
-    )
-
-    answer = st.text_area(
-        "Resposta da IA",
-        height=220,
-        placeholder=(
-            "Cole aqui a resposta que deseja avaliar..."
-        ),
-    )
-
-    if st.button(
-        "🧪 Avaliar",
-        type="primary",
-    ):
-
-        if not question.strip():
-
-            st.warning(
-                "Informe a pergunta."
-            )
-
-        elif not answer.strip():
-
-            st.warning(
-                "Informe a resposta."
-            )
-
-        else:
-
-            try:
-
-                with st.spinner(
-                    "Recuperando contexto para avaliação..."
-                ):
-
-                    rag_result = safe_dict(
-                        rag_answer(
-                            question,
-                            user.get(
-                                "organization_id"
-                            ),
-                            top_k=8,
-                            rerank_k=5,
-                            generate_answer_flag=False,
-                        )
-                    )
-
-                score = evaluate_answer(
-                    question,
-                    answer,
-                    safe_list(
-                        rag_result.get(
-                            "reranked"
-                        )
-                    ),
-                    safe_list(
-                        rag_result.get(
-                            "citations"
-                        )
-                    ),
-                )
-
-                score = safe_dict(
-                    score
-                )
-
-                a, b, c, d = st.columns(
-                    4
-                )
-
-                a.metric(
-                    "Context relevance",
-                    f"{float(score.get('context_relevance', 0)):.2f}",
-                )
-
-                b.metric(
-                    "Citation coverage",
-                    f"{float(score.get('citation_coverage', 0)):.2f}",
-                )
-
-                c.metric(
-                    "Groundedness",
-                    f"{float(score.get('groundedness', 0)):.2f}",
-                )
-
-                d.metric(
-                    "Overall",
-                    f"{float(score.get('overall', 0)):.2f}",
-                )
-
-                st.markdown(
-                    f"""
-                    ### Qualidade:
-                    **{score.get('quality', 'N/D')}**
-                    """
-                )
-
-                recommendations = score.get(
-                    "recommendations",
-                    [],
-                )
-
-                if recommendations:
-
-                    st.markdown(
-                        "### 💡 Recomendações"
-                    )
-
-                    for recommendation in safe_list(
-                        recommendations
-                    ):
-
-                        st.info(
-                            recommendation
-                        )
-
-                with st.expander(
-                    "JSON completo"
-                ):
-
-                    st.json(
-                        score
-                    )
-
-            except Exception as exc:
-
-                st.error(
-                    f"Erro na avaliação: {exc}"
-                )
-
-                st.code(
-                    traceback.format_exc()
-                )
-
-
-# ============================================================
-# PROCESSOS
-# ============================================================
-
-elif page == "Processos":
-
-    st.markdown(
-        """
-        <div class="hero">
-
-            <h1>
-                ⚖️ Processos
-            </h1>
-
-            <p>
-                Controle processos, prioridades,
-                clientes e status.
-            </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    with st.form(
-        "new_case"
-    ):
-
-        title = st.text_input(
-            "Título"
-        )
-
-        client = st.text_input(
-            "Cliente"
-        )
-
-        category = st.selectbox(
-            "Categoria",
-            [
-                "Cível",
-                "Trabalhista",
-                "Contratos",
-                "Tributário",
-                "Previdenciário",
-                "Outros",
-            ],
-        )
-
-        priority = st.selectbox(
-            "Prioridade",
-            [
-                "Baixa",
-                "Média",
-                "Alta",
-            ],
-        )
-
-        submitted = st.form_submit_button(
-            "Cadastrar",
-            type="primary",
-        )
-
-        if submitted:
-
-            if not title.strip():
-
-                st.warning(
-                    "Informe o título do processo."
-                )
-
-            else:
-
-                try:
-
-                    create_case(
-                        user.get(
-                            "organization_id"
-                        ),
-                        title.strip(),
-                        client.strip(),
-                        category,
-                        priority,
-                    )
-
-                    st.success(
-                        "Processo criado."
-                    )
-
-                    st.rerun()
-
-                except Exception as exc:
-
-                    st.error(
-                        f"Erro ao criar processo: {exc}"
-                    )
-
-    st.markdown(
-        "### Processos cadastrados"
-    )
-
-    try:
-
-        cases = list_cases(
-            user.get(
-                "organization_id"
-            )
-        )
-
-        if not cases:
-
-            st.info(
-                "Nenhum processo cadastrado."
-            )
-
-        for case in cases:
-
-            if not isinstance(
-                case,
-                dict,
-            ):
-                continue
-
-            with st.container(
-                border=True
-            ):
-
-                st.write(
-                    f"**{case.get('title', 'Processo')}**"
-                )
-
-                st.caption(
-                    f"{case.get('client', 'N/D')} · "
-                    f"{case.get('category', 'N/D')} · "
-                    f"{case.get('priority', 'N/D')} · "
-                    f"{case.get('status', 'N/D')}"
-                )
-
-    except Exception as exc:
-
-        st.error(
-            f"Erro ao carregar processos: {exc}"
-        )
-
-
-# ============================================================
-# PESQUISAS JURÍDICAS / JURISPRUDÊNCIA
-# ============================================================
-
-elif page in (
-    "Pesquisas Jurídicas",
-    "Jurisprudência",
-):
-
-    title = (
-        "🔎 Pesquisas Jurídicas"
-        if page == "Pesquisas Jurídicas"
-        else "⚖️ Jurisprudência"
-    )
-
-    st.markdown(
-        f"""
-        <div class="hero">
-
-            <h1>
-                {title}
-            </h1>
-
-            <p>
-                Área preparada para consultas jurídicas
-                com fontes e evidências.
-            </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    q = st.text_input(
-        "O que deseja pesquisar?",
-        placeholder=(
-            "Ex.: responsabilidade civil por falha "
-            "na prestação de serviço"
-        ),
-    )
-
-    if st.button(
-        "Pesquisar",
-        type="primary",
-    ):
-
-        if not q.strip():
-
-            st.warning(
-                "Digite uma consulta."
-            )
-
-        else:
-
-            st.info(
-                "A interface de pesquisa está preparada. "
-                "Para pesquisa jurídica externa com fontes "
-                "atuais, conecte o serviço de pesquisa ao backend."
-            )
-
-    st.markdown(
-        "### Pesquisas recentes"
-    )
-
-    for item in [
-        "Jurisprudência sobre danos morais",
-        "Prazo para interposição de recurso",
-        "Responsabilidade civil do fornecedor",
-    ]:
-
-        with st.container(
-            border=True
-        ):
-
-            st.write(
-                f"**{item}**"
-            )
-
-            st.caption(
-                "Pesquisa jurídica · fonte a consultar"
-            )
-
-
-# ============================================================
-# MODELOS E PETIÇÕES
-# ============================================================
-
-elif page == "Modelos e Petições":
-
-    st.markdown(
-        """
-        <div class="hero">
-
-            <h1>
-                📝 Modelos e Petições
-            </h1>
-
-            <p>
-                Biblioteca para organizar modelos jurídicos
-                e documentos reutilizáveis.
-            </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.info(
-        "Módulo preparado para integração "
-        "com sua biblioteca de modelos."
-    )
-
-
-# ============================================================
-# AGENDA E PRAZOS
-# ============================================================
-
-elif page == "Agenda e Prazos":
-
-    st.markdown(
-        """
-        <div class="hero">
-
-            <h1>
-                ◷ Agenda e Prazos
-            </h1>
-
-            <p>
-                Organize compromissos e prazos processuais.
-            </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.info(
-        "Módulo de agenda preparado para integração "
-        "com calendário e prazos."
-    )
-
-
-# ============================================================
-# CLIENTES
-# ============================================================
-
-elif page == "Clientes":
-
-    st.markdown(
-        """
-        <div class="hero">
-
-            <h1>
-                ♙ Clientes
-            </h1>
-
-            <p>
-                Central de clientes e relacionamento jurídico.
-            </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.info(
-        "Módulo de clientes preparado para integração "
-        "com o cadastro do sistema."
-    )
-
-
-# ============================================================
-# AUDITORIA
-# ============================================================
-
-elif page == "Auditoria":
-
-    st.markdown(
-        """
-        <div class="hero">
-
-            <h1>
-                🛡️ Auditoria
-            </h1>
-
-            <p>
-                Histórico de eventos e ações realizadas
-                no tenant.
-            </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    try:
-
-        from db import get_connection
-
-        with get_connection() as connection:
-
-            rows = connection.execute(
-                """
-                SELECT
-                    action,
-                    entity_type,
-                    entity_id,
-                    created_at,
-                    metadata
-                FROM audit_logs
-                WHERE organization_id=?
-                ORDER BY id DESC
-                LIMIT 100
-                """,
-                (
-                    user.get(
-                        "organization_id"
-                    ),
-                ),
-            ).fetchall()
-
-        if not rows:
-
-            st.info(
-                "Nenhum evento encontrado."
-            )
-
-        else:
-
-            for row in rows:
-
-                st.write(
-                    f"`{row['created_at']}` · "
-                    f"**{row['action']}** · "
-                    f"{row['entity_type']}#"
-                    f"{row['entity_id']} · "
-                    f"{row['metadata']}"
-                )
-
-    except Exception as exc:
-
-        st.error(
-            f"Erro ao carregar auditoria: {exc}"
-        )
+                    st.error(f"Erro na análise de risco: {exc}")
+                    st.code(traceback.format_exc())
 
 
 # ============================================================
@@ -2337,16 +1463,8 @@ elif page == "Configurações":
     st.markdown(
         """
         <div class="hero">
-
-            <h1>
-                &#9881;&#65039; Configurações
-            </h1>
-
-            <p>
-                Controle LLM, RAG, segurança,
-                agentes e parâmetros da plataforma.
-            </p>
-
+            <h1>⚙️ Configurações</h1>
+            <p>Controle LLM, RAG, segurança, agentes e parâmetros.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2357,75 +1475,13 @@ elif page == "Configurações":
     c1, c2 = st.columns(2)
 
     with c1:
-
-        st.markdown(
-            "### &#129302; Inteligência Artificial"
-        )
-
-        llm = st.selectbox(
-            "LLM",
-            [
-                "Modo Demo",
-                "Gemini",
-                "OpenAI",
-            ],
-        )
-
-        top_k = st.number_input(
-            "Retriever Top-K",
-            min_value=1,
-            max_value=50,
-            value=8,
-        )
-
-        rerank_k = st.number_input(
-            "Reranker Top-K",
-            min_value=1,
-            max_value=20,
-            value=5,
-        )
+        st.markdown("### 🤖 Inteligência Artificial")
+        llm = st.selectbox("LLM", ["Modo Demo", "Gemini", "OpenAI"])
+        top_k = st.number_input("Retriever Top-K", min_value=1, max_value=50, value=8)
+        rerank_k = st.number_input("Reranker Top-K", min_value=1, max_value=20, value=5)
 
     with c2:
-
-        st.markdown(
-            "### &#128737;&#65039; Segurança"
-        )
-
-        citations_required = st.checkbox(
-            "Citações obrigatórias",
-            True,
-        )
-
-        evaluation_enabled = st.checkbox(
-            "Evaluation habilitado",
-            True,
-        )
-
-        guard_enabled = st.checkbox(
-            "Guard Agent habilitado",
-            True,
-        )
-
-    st.markdown(
-        "### &#129488; Agentes"
-    )
-
-    agents = [
-        "Agente Jurídico",
-        "Agente de Risco",
-        "Agente de Resumo",
-        "Agente Geral",
-        "RAG",
-        "Citações",
-        "Evaluation",
-        "Guard Agent",
-    ]
-
-    cols = st.columns(4)
-
-    for i, name in enumerate(
-        agents
-    ):
-
-        with cols[i % 4]:
-            st.checkbox(name, value=True)
+        st.markdown("### 🛡️ Segurança")
+        citations_required = st.checkbox("Citações obrigatórias", True)
+        evaluation_enabled = st.checkbox("Evaluation habilitado", True)
+        guard_enabled = st.checkbox("Guard Agent habilitado", True)

@@ -811,15 +811,12 @@ if page == "Dashboard":
     st.markdown(
         """
         <div class="hero">
-
             <h1>
                 Olá, Dr. 👋
             </h1>
-
             <p>
                 Como posso ajudar você hoje?
             </p>
-
         </div>
         """,
         unsafe_allow_html=True,

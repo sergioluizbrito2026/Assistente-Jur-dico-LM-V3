@@ -1186,10 +1186,10 @@ elif page == "Assistente IA":
     st.markdown(
         """
         <div class="hero">
-            <h1>🧑‍⚖️ Assistente Jurídico IA</h1>
+            <h1>Assistente Juridico IA</h1>
             <p>
-                Analise documentos, consulte sua base jurídica
-                e obtenha respostas fundamentadas em evidências.
+                Analise documentos, consulte sua base juridica
+                e obtenha respostas fundamentadas em evidencias.
             </p>
         </div>
         """,
@@ -1198,7 +1198,7 @@ elif page == "Assistente IA":
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Histórico
+    # Historico
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -1232,8 +1232,8 @@ elif page == "Assistente IA":
 
         with st.chat_message("assistant"):
             with st.spinner(
-                "Analisando → Guard → RAG → "
-                "Retriever → Reranker → Agente → LLM..."
+                "Analisando -> Guard -> RAG -> "
+                "Retriever -> Reranker -> Agente -> LLM..."
             ):
                 result = call_orchestrator(
                     query=q,
@@ -1257,9 +1257,9 @@ elif page == "Assistente IA":
                 st.markdown(response)
             else:
                 st.warning(
-                    "A execução terminou sem uma "
-                    "resposta textual. As evidências "
-                    "recuperadas permanecem disponíveis abaixo."
+                    "A execucao terminou sem uma "
+                    "resposta textual. As evidencias "
+                    "recuperadas permanecem disponiveis abaixo."
                 )
 
             render_citations(
@@ -1272,7 +1272,7 @@ elif page == "Assistente IA":
 
             if result.get("error"):
                 with st.expander(
-                    "⚠️ Detalhes técnicos"
+                    "Detalhes tecnicos"
                 ):
                     st.code(
                         str(
@@ -1327,7 +1327,7 @@ elif page == "Assistente IA":
                 "role": "assistant",
                 "content": (
                     response
-                    or "Execução sem resposta textual."
+                    or "Execucao sem resposta textual."
                 ),
             }
         )

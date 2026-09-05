@@ -1022,77 +1022,67 @@ if page == "Dashboard":
         st.markdown("<br>", unsafe_allow_html=True)
 
         st.markdown(
-            """
-            <div class="section-title">
-                📄 Documentos Recentes
-            </div>
-            """,
-            unsafe_allow_html=True,
+        """
+        <div class="section-title">
+            📄 Documentos Recentes
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    try:
+        documents = list_documents(
+            user.get("organization_id")
         )
 
-        try:
-
-            documents = list_documents(
-                user.get("organization_id")
+        if not documents:
+            st.info(
+                "Nenhum documento encontrado."
             )
 
-            if not documents:
+        for document in documents[:5]:
+            if not isinstance(
+                document,
+                dict,
+            ):
+                continue
 
-                st.info(
-                    "Nenhum documento encontrado."
+            with st.container(
+                border=True
+            ):
+                c1, c2, c3 = st.columns(
+                    [0.1, 0.72, 0.18]
                 )
 
-            for document in documents[:5]:
+                with c1:
+                    st.markdown("📄")
 
-                if not isinstance(
-                    document,
-                    dict,
-                ):
-                    continue
-
-                with st.container(
-                    border=True
-                ):
-
-                    c1, c2, c3 = st.columns(
-                        [0.1, 0.72, 0.18]
+                with c2:
+                    st.write(
+                        f"**{document.get('name', 'Documento')}**"
                     )
 
-                    with c1:
-                        st.markdown("📄")
+                    st.caption(
+                        f"{document.get('type', 'N/D')} · "
+                        f"{document.get('pages', 0)} páginas · "
+                        f"{document.get('chunks', 0)} chunks"
+                    )
 
-                    with c2:
+                with c3:
+                    status = document.get(
+                        "status",
+                        "N/D",
+                    )
 
-                        st.write(
-                            f"**{document.get('name', 'Documento')}**"
-                        )
+                    if status == "Indexado":
+                        st.success(status)
+                    else:
+                        st.warning(status)
 
-                        st.caption(
-                            f"{document.get('type', 'N/D')} · "
-                            f"{document.get('pages', 0)} páginas · "
-                            f"{document.get('chunks', 0)} chunks"
-                        )
-
-                    with c3:
-
-                        status = document.get(
-                            "status",
-                            "N/D",
-                        )
-
-                        if status == "Indexado":
-
-                            st.success(status)
-
-                        else:
-
-                            st.warning(status)
-
-        except Exception as exc:
-
-            st.error(
-                f"Erro ao carregar documentos: {exc}"
-            )
+    except Exception as exc:
+        st.error(
+            f"Erro ao carregar documentos: {exc}"
+        )
 
     # ============================================================
     # LATERAL DASHBOARD

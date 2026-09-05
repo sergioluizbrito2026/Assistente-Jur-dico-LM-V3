@@ -510,8 +510,8 @@ page = st.session_state.page
 # ============================================================
 # DASHBOARD
 # ============================================================
-
-elif page == "Dashboard":
+if page == "Dashboard":
+    import plotly.express as px
 
     st.title("⚖️ JURÍDICO SaaS")
     st.caption("Inteligência Artificial v3.1 — Painel de Controle Consolidado")
@@ -588,9 +588,8 @@ elif page == "Dashboard":
     st.markdown('<div class="section-title">📊 Visão Geral & Estatísticas</div>', unsafe_allow_html=True)
     g1, g2, g3 = st.columns(3)
 
-    # Configuração comum para travar o zoom, scroll e barra de ferramentas do Plotly
     plotly_config = {
-        "staticPlot": True  # Torna o gráfico totalmente estático, bloqueando qualquer movimento do mouse
+        "staticPlot": True
     }
 
     with g1:
@@ -607,7 +606,6 @@ elif page == "Dashboard":
     with g2:
         with st.container(border=True):
             st.markdown("**Riscos Identificados**")
-            # Ordem lógica corrigida: Baixo -> Médio -> Alto
             fig2 = px.bar(
                 x=["Baixo", "Médio", "Alto"],
                 y=[8, 12, 7],
@@ -619,7 +617,6 @@ elif page == "Dashboard":
     with g3:
         with st.container(border=True):
             st.markdown("**Atividade da IA (Semanal)**")
-            # Ordem cronológica dos dias
             fig3 = px.line(
                 x=["Seg", "Ter", "Qua", "Qui", "Sex"],
                 y=[45, 68, 82, 55, 90],

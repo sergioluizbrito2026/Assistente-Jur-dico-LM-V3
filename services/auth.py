@@ -5,7 +5,7 @@ services/auth.py
 Autenticação e controle de sessão do usuário.
 """
 
-from **future** import annotations
+from __future__ import annotations
 
 from typing import Any, Dict, Optional
 

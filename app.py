@@ -994,7 +994,7 @@ elif page == "Assistente IA":
             })
 
 # ============================================================
-# DOCUMENTOS & GESTÃO DA BASE DE CONHECIMENTO (RAG)
+# DOCUMENTOS & GESTÃO DA BASE DE CONHECIMENTO (VERSÃO CORRIGIDA)
 # ============================================================
 
 elif page == "Documentos":
@@ -1042,12 +1042,17 @@ elif page == "Documentos":
     col_main, col_side = st.columns([2, 1])
 
     with col_main:
-        # 3️⃣ Área de Upload Bonita e Moderna
+        # 3️⃣ Área de Upload Limpa e Integrada
         with st.container(border=True):
             st.markdown("📤 **Adicionar novos documentos**")
-            st.markdown("<div style='text-align: center; padding: 20px; border: 2px dashed #cbd5e1; border-radius: 10px; background: #fafbfc;'>☁️ Arraste seus documentos aqui<br><span style='font-size:0.8rem; color:#64748b;'>PDF, DOCX ou TXT • até 200 MB</span></div>", unsafe_allow_html=True)
+            st.caption("Arraste e solte seus arquivos abaixo ou clique para selecionar.")
             
-            uploaded_file = st.file_uploader("Selecionar arquivos", type=["pdf", "docx", "txt"], label_visibility="collapsed")
+            # Usamos o file_uploader limpo do Streamlit sem duplicar caixas visuais
+            uploaded_file = st.file_uploader(
+                "Carregar arquivos (PDF, DOCX, TXT)", 
+                type=["pdf", "docx", "txt"], 
+                label_visibility="collapsed"
+            )
             
             use_ocr = st.checkbox("☑ Usar OCR quando necessário (para documentos digitalizados / escaneados)", value=True)
             

@@ -1105,15 +1105,15 @@ if page == "Dashboard":
                 <hr>
                 <div>
                     Alto risco
-                    <b style="float:right;">—</b>
+                    <b style="float:right;">-</b>
                 </div>
                 <div>
                     Medio risco
-                    <b style="float:right;">—</b>
+                    <b style="float:right;">-</b>
                 </div>
                 <div>
                     Baixo risco
-                    <b style="float:right;">—</b>
+                    <b style="float:right;">-</b>
                 </div>
             </div>
             """,
@@ -2431,13 +2431,4 @@ elif page == "Configurações":
     ):
 
         with cols[i % 4]:
-
-            st.markdown(
-                f"""
-                <div class="card" style="text-align: center; padding: 10px;">
-                    <b>{name}</b>
-                    <p style="color: green; margin: 0;">Ativo</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            st.checkbox(name, value=True)

@@ -7,7 +7,6 @@ RAG -> Retriever -> Reranker -> Guard -> Orchestrator
      -> LLM -> Citações -> Evaluation
 """
 
-
 from __future__ import annotations
 
 import inspect
@@ -25,6 +24,7 @@ from services.evaluation import evaluate_answer
 from services.rag_pipeline import rag_answer, retrieve_and_rerank
 from services.ai_orchestrator import orchestrate, risk_analysis
 from services.auth import authenticate, get_current_user, logout
+from services.ingestion import ingest_document
 
 
 # ============================================================
@@ -40,62 +40,18 @@ st.set_page_config(
 
 
 # ============================================================
-# BANCO DE DADOS
-# ============================================================
-
-from db import init_db, seed_demo
-
-
-# ============================================================
-# SERVIÇOS
-# ============================================================
-
-from services.audit import audit
-
-from services.auth import (
-    authenticate,
-    get_current_user,
-    logout,
-)
-
-from services.cases import (
-    create_case,
-    list_cases,
-)
-
-from services.documents import list_documents
-
-from services.evaluation import evaluate_answer
-
-from services.ingestion import ingest_document
-
-from services.rag_pipeline import (
-    rag_answer,
-    retrieve_and_rerank,
-)
-
-from services.ai_orchestrator import (
-    orchestrate,
-    risk_analysis,
-)
-
-
-# ============================================================
 # BANCO DE DADOS — INICIALIZAÇÃO
 # ============================================================
 
 try:
     init_db()
-
 except Exception as exc:
     st.error("Erro ao inicializar o banco de dados.")
-
     with st.expander("Detalhes técnicos"):
         st.code(
             f"{type(exc).__name__}: {exc}\n\n"
             f"{traceback.format_exc()}"
         )
-
     st.stop()
 
 
@@ -105,13 +61,11 @@ except Exception as exc:
 
 try:
     seed_demo()
-
 except Exception as exc:
     st.warning(
         "O banco foi inicializado, mas os dados "
         "demonstrativos não puderam ser carregados."
     )
-
     with st.expander("Detalhes técnicos"):
         st.code(
             f"{type(exc).__name__}: {exc}\n\n"
@@ -119,14 +73,13 @@ except Exception as exc:
         )
 
 
-
-
+# ============================================================
+# ESTILO GLOBAL (CSS)
 # ============================================================
 
 st.markdown(
     """
 <style>
-
 :root {
     --navy:#07152b;
     --navy2:#0b1d38;
@@ -164,7 +117,6 @@ st.markdown(
         #07152b 0%,
         #091b35 100%
     );
-
     border-right:1px solid #183253;
 }
 
@@ -320,47 +272,12 @@ st.markdown(
     font-size:0.76rem;
 }
 
-.status-ok {
-    color:var(--green);
-    font-weight:700;
-}
-
-.risk-high {
-    color:var(--red);
-    font-weight:750;
-}
-
-.risk-medium {
-    color:#d97706;
-    font-weight:750;
-}
-
-.risk-low {
-    color:var(--green);
-    font-weight:750;
-}
-
-.chat-panel {
-    background:white;
-    border:1px solid var(--border);
-    border-radius:18px;
-    padding:1rem;
-    box-shadow:0 5px 20px rgba(20,32,51,.04);
-}
-
 .citation {
     background:#f7f9fd;
     border:1px solid var(--border);
     border-radius:10px;
     padding:0.55rem 0.7rem;
     margin:0.35rem 0;
-}
-
-.risk-box {
-    border-radius:14px;
-    padding:1rem;
-    background:#fff7f7;
-    border:1px solid #ffd7db;
 }
 
 .footer-note {
@@ -387,7 +304,6 @@ div[data-testid="stFileUploader"] {
 .stButton > button[kind="primary"] {
     border-radius:10px;
 }
-
 </style>
 """,
     unsafe_allow_html=True,
@@ -399,14 +315,8 @@ div[data-testid="stFileUploader"] {
 # ============================================================
 
 def safe_dict(value: Any) -> Dict[str, Any]:
-    """
-    Garante que o resultado de um serviço seja convertido
-    para um dicionário seguro.
-    """
-
     if isinstance(value, dict):
         return value
-
     return {
         "answer": str(value or ""),
         "citations": [],
@@ -416,16 +326,10 @@ def safe_dict(value: Any) -> Dict[str, Any]:
 
 
 def safe_list(value: Any) -> list:
-    """
-    Garante uma lista segura.
-    """
-
     if isinstance(value, list):
         return value
-
     if isinstance(value, tuple):
         return list(value)
-
     return []
 
 
@@ -437,11 +341,6 @@ def call_orchestrator(
     rerank_k: int = 5,
     extra_context: str | None = None,
 ) -> Dict[str, Any]:
-    """
-    Chama o orchestrator de forma compatível com diferentes
-    assinaturas da função orchestrate().
-    """
-
     query = str(query or "").strip()
 
     if not query:
@@ -466,7 +365,6 @@ def call_orchestrator(
     }
 
     try:
-
         signature = inspect.signature(orchestrate)
         parameters = signature.parameters
 
@@ -476,36 +374,21 @@ def call_orchestrator(
         )
 
         if accepts_kwargs:
-            filtered = {
-                k: v
-                for k, v in kwargs.items()
-                if v is not None
-            }
-
+            filtered = {k: v for k, v in kwargs.items() if v is not None}
         else:
-            filtered = {
-                k: v
-                for k, v in kwargs.items()
-                if k in parameters and v is not None
-            }
+            filtered = {k: v for k, v in kwargs.items() if k in parameters and v is not None}
 
-        # Evita enviar query e question simultaneamente
         if "query" in parameters:
             filtered.pop("question", None)
-
         elif "question" in parameters:
             filtered.pop("query", None)
 
-        # Evita enviar org_id e organization_id simultaneamente
         if "org_id" in parameters:
             filtered.pop("organization_id", None)
-
         elif "organization_id" in parameters:
             filtered.pop("org_id", None)
 
-        result = safe_dict(
-            orchestrate(**filtered)
-        )
+        result = safe_dict(orchestrate(**filtered))
 
         result.setdefault("answer", "")
         result.setdefault("citations", [])
@@ -517,7 +400,6 @@ def call_orchestrator(
         return result
 
     except Exception as exc:
-
         return {
             "answer": "",
             "citations": [],
@@ -530,49 +412,21 @@ def call_orchestrator(
 
 
 def render_citations(citations):
-    """
-    Renderiza as evidências recuperadas.
-    """
-
     citations = safe_list(citations)
-
     if not citations:
         return
 
     st.markdown("#### 📚 Evidências e citações")
 
     for i, citation in enumerate(citations, 1):
-
         if not isinstance(citation, dict):
             continue
 
         cid = citation.get("id", i)
-
-        doc = citation.get(
-            "document",
-            citation.get(
-                "document_name",
-                "Documento",
-            ),
-        )
-
-        page = citation.get(
-            "page",
-            "N/D",
-        )
-
-        chunk = citation.get(
-            "chunk_id",
-            "N/D",
-        )
-
-        content = citation.get(
-            "content",
-            citation.get(
-                "text",
-                "",
-            ),
-        )
+        doc = citation.get("document", citation.get("document_name", "Documento"))
+        page = citation.get("page", "N/D")
+        chunk = citation.get("chunk_id", "N/D")
+        content = citation.get("content", citation.get("text", ""))
 
         st.markdown(
             f"""
@@ -587,122 +441,47 @@ def render_citations(citations):
         )
 
         if content:
-
-            with st.expander(
-                "Ver trecho da evidência"
-            ):
+            with st.expander("Ver trecho da evidência"):
                 st.write(content)
 
 
 def render_diagnostic(result):
-    """
-    Mostra diagnóstico técnico da execução.
-    Versão segura contra SyntaxError em f-strings.
-    """
-
     result = safe_dict(result)
 
-    with st.expander(
-        "🔍 Diagnóstico da execução",
-        expanded=False,
-    ):
-
+    with st.expander("🔍 Diagnóstico da execução", expanded=False):
         c1, c2, c3 = st.columns(3)
 
-        agent = str(
-            result.get("agent", "N/D")
-        )
+        agent = str(result.get("agent", "N/D"))
+        intent = str(result.get("intent", "N/D"))
+        citations = safe_list(result.get("citations"))
+        evidence_count = result.get("evidence_count", len(citations))
+        retrieved = safe_list(result.get("retrieved"))
+        reranked = safe_list(result.get("reranked"))
+        latency = result.get("latency_ms", "N/D")
 
-        intent = str(
-            result.get("intent", "N/D")
-        )
+        c1.write("**Agente:** " + agent)
+        c2.write("**Intent:** " + intent)
+        c3.write("**Evidências:** " + str(evidence_count))
 
-        citations = safe_list(
-            result.get("citations")
-        )
+        c1.write("**Documentos recuperados:** " + str(len(retrieved)))
+        c2.write("**Chunks reranked:** " + str(len(reranked)))
+        c3.write("**Latência:** " + str(latency) + " ms")
 
-        evidence_count = result.get(
-            "evidence_count",
-            len(citations),
-        )
-
-        retrieved = safe_list(
-            result.get("retrieved")
-        )
-
-        reranked = safe_list(
-            result.get("reranked")
-        )
-
-        latency = result.get(
-            "latency_ms",
-            "N/D",
-        )
-
-        c1.write(
-            "**Agente:** " + agent
-        )
-
-        c2.write(
-            "**Intent:** " + intent
-        )
-
-        c3.write(
-            "**Evidências:** "
-            + str(evidence_count)
-        )
-
-        c1.write(
-            "**Documentos recuperados:** "
-            + str(len(retrieved))
-        )
-
-        c2.write(
-            "**Chunks reranked:** "
-            + str(len(reranked))
-        )
-
-        c3.write(
-            "**Latência:** "
-            + str(latency)
-            + " ms"
-        )
-
-        guard = result.get(
-            "guard",
-            {},
-        )
-
+        guard = result.get("guard", {})
         if isinstance(guard, dict):
-
-            allowed = guard.get(
-                "allowed",
-                True,
-            )
-
+            allowed = guard.get("allowed", True)
             if allowed:
-                st.write(
-                    "**Guard Agent:** 🟢 Permitido"
-                )
+                st.write("**Guard Agent:** 🟢 Permitido")
             else:
-                st.write(
-                    "**Guard Agent:** 🔴 Bloqueado"
-                )
+                st.write("**Guard Agent:** 🔴 Bloqueado")
 
         reason = result.get("reason")
-
         if reason:
-            st.info(
-                str(reason)
-            )
+            st.info(str(reason))
 
         error = result.get("error")
-
         if error:
-            st.error(
-                str(error)
-            )
-
+            st.error(str(error))
 
 
 # ============================================================
@@ -712,44 +491,23 @@ def render_diagnostic(result):
 user = get_current_user()
 
 if not user:
-
     st.markdown(
         """
-        <div style="
-            max-width:520px;
-            margin:7rem auto 0;
-            text-align:center;
-        ">
-            <div style="font-size:3.2rem;">
-                ⚖️
-            </div>
-
-            <h1>
-               st.markdown(
-    """
-    <div style="text-align: center; padding: 20px;">
-        <h1>Assistente Jurídico IA</h1>
-        <p style="color:#6c7890;">
-            Inteligência artificial para documentos,
-            riscos, pesquisas e análises jurídicas.
-        </p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+        <div style="text-align: center; padding: 20px;">
+            <div style="font-size:3.2rem;">⚖️</div>
+            <h1>Assistente Jurídico IA</h1>
+            <p style="color:#6c7890;">
+                Inteligência artificial para documentos,
+                riscos, pesquisas e análises jurídicas.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     with st.form("login"):
-
-        email = st.text_input(
-            "E-mail",
-            "admin@demo.local",
-        )
-
-        password = st.text_input(
-            "Senha",
-            "admin123",
-            type="password",
-        )
+        email = st.text_input("E-mail", "admin@demo.local")
+        password = st.text_input("Senha", "admin123", type="password")
 
         submitted = st.form_submit_button(
             "Entrar",
@@ -758,35 +516,20 @@ if not user:
         )
 
         if submitted:
-
             try:
-
-                if authenticate(
-                    email,
-                    password,
-                ):
+                if authenticate(email, password):
                     st.rerun()
-
                 else:
-                    st.error(
-                        "Credenciais inválidas."
-                    )
-
+                    st.error("Credenciais inválidas.")
             except Exception as exc:
+                st.error(f"Erro durante autenticação: {exc}")
 
-                st.error(
-                    f"Erro durante autenticação: {exc}"
-                )
-
-    st.info(
-        "Demo: admin@demo.local / admin123"
-    )
-
+    st.info("Demo: admin@demo.local / admin123")
     st.stop()
 
 
 # ============================================================
-# SESSION
+# SESSION STATE & SIDEBAR NAVIGATION
 # ============================================================
 
 if "page" not in st.session_state:
@@ -795,12 +538,37 @@ if "page" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+with st.sidebar:
+    st.markdown(
+        """
+        <div class="sidebar-brand">
+            <div class="logo">⚖️</div>
+            <div class="title">Jurídico SaaS</div>
+            <div class="sub">Inteligência Artificial v3.1</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-File "/mount/src/assistente-jur-dico-lm-v3/app.py", line 808
-              <div class="logo">⚖️</div>
-                                ^
-SyntaxError: invalid character '⚖' (U+2696)
+    if st.button("📊 Dashboard", use_container_width=True):
+        st.session_state.page = "Dashboard"
+        st.rerun()
 
+    if st.button("💬 Assistente IA", use_container_width=True):
+        st.session_state.page = "Assistente IA"
+        st.rerun()
+
+    if st.button("📄 Documentos", use_container_width=True):
+        st.session_state.page = "Documentos"
+        st.rerun()
+
+    st.markdown("---")
+
+    if st.button("🚪 Sair", use_container_width=True):
+        logout()
+        st.rerun()
+
+page = st.session_state.page
 
 
 # ============================================================
@@ -808,15 +576,9 @@ SyntaxError: invalid character '⚖' (U+2696)
 # ============================================================
 
 if page == "Dashboard":
-
     st.title("Olá, Dr. 👋")
     st.markdown("### Como posso ajudar você hoje?")
-
     st.markdown("<br>", unsafe_allow_html=True)
-
-   # ============================================================
-    # MÉTRICAS REAIS
-    # ============================================================
 
     try:
         from db import get_connection
@@ -903,21 +665,14 @@ if page == "Dashboard":
 
     left, right = st.columns([2.1, 1])
 
-    # --------------------------------------------------------
-    # CENTRAL
-    # --------------------------------------------------------
-
     with left:
-
         st.markdown(
             """
             <div class="card">
-
                 <div class="section-title">
                     Pergunte algo sobre seus
                     documentos ou sobre direito...
                 </div>
-
             </div>
             """,
             unsafe_allow_html=True,
@@ -925,95 +680,48 @@ if page == "Dashboard":
 
         dash_q = st.text_input(
             "Pergunta jurídica",
-            placeholder=(
-                "Ex.: Quem é a CONTRATANTE?"
-            ),
+            placeholder="Ex.: Quem é a CONTRATANTE?",
             label_visibility="collapsed",
             key="dashboard_question",
         )
 
-        a, b, c = st.columns(
-            [1, 1, 1.3]
-        )
+        a, b, c = st.columns([1, 1, 1.3])
 
         with a:
-
-            attach = st.button(
-                "📎 Anexar documentos",
-                use_container_width=True,
-            )
+            attach = st.button("📎 Anexar documentos", use_container_width=True)
 
         with b:
-
-            research = st.button(
-                "⚖️ Pesquisa Jurídica",
-                use_container_width=True,
-            )
+            research = st.button("⚖️ Pesquisa Jurídica", use_container_width=True)
 
         with c:
-
-            risk = st.button(
-                "🛡️ Análise de Risco",
-                use_container_width=True,
-            )
+            risk = st.button("🛡️ Análise de Risco", use_container_width=True)
 
         if dash_q:
-
-            if st.button(
-                "➤ Perguntar",
-                type="primary",
-            ):
-
-                st.session_state.page = (
-                    "Assistente IA"
-                )
-
-                st.session_state.pending_question = (
-                    dash_q
-                )
-
+            if st.button("➤ Perguntar", type="primary"):
+                st.session_state.page = "Assistente IA"
+                st.session_state.pending_question = dash_q
                 st.rerun()
 
         if attach:
-
-            st.session_state.page = (
-                "Documentos"
-            )
-
+            st.session_state.page = "Documentos"
             st.rerun()
 
         if research:
-
-            st.session_state.page = (
-                "Pesquisas Jurídicas"
-            )
-
+            st.session_state.page = "Assistente IA"
+            st.session_state.pending_question = "Faça uma pesquisa jurídica sobre: "
             st.rerun()
 
         if risk:
-
-            st.session_state.page = (
-                "Análise de Risco"
-            )
-
+            st.session_state.page = "Assistente IA"
+            st.session_state.pending_question = "Faça uma análise de risco detalhada dos documentos."
             st.rerun()
 
         st.markdown(
             """
             <div style="margin-top:.7rem;">
-
-                <span class="question-chip">
-                    Quais são os riscos deste contrato?
-                </span>
-
-                <span class="question-chip">
-                    Resuma a petição inicial
-                </span>
-
-                <span class="question-chip">
-                    Qual o prazo para recurso?
-                </span>
-
+                <span class="question-chip">Quais são os riscos deste contrato?</span>
+                <span class="question-chip">Resuma a petição inicial</span>
+                <span class="question-chip">Qual o prazo para recurso?</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1021,175 +729,120 @@ if page == "Dashboard":
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-     st.markdown(
-        """
-        <div class="section-title">
-            &#128196; Documentos Recentes
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    try:
-        documents = list_documents(
-            user.get("organization_id")
+        st.markdown(
+            """
+            <div class="section-title">
+                📄 Documentos Recentes
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-        if not documents:
-            st.info(
-                "Nenhum documento encontrado."
-            )
+        try:
+            documents = list_documents(user.get("organization_id"))
 
-        for document in documents[:5]:
-            if not isinstance(
-                document,
-                dict,
-            ):
-                continue
+            if not documents:
+                st.info("Nenhum documento encontrado.")
 
-            with st.container(
-                border=True
-            ):
-                c1, c2, c3 = st.columns(
-                    [0.1, 0.72, 0.18]
-                )
+            for document in documents[:5]:
+                if not isinstance(document, dict):
+                    continue
 
-                with c1:
-                    st.markdown("&#128196;", unsafe_allow_html=True)
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns([0.1, 0.72, 0.18])
 
-                with c2:
-                    st.write(
-                        f"**{document.get('name', 'Documento')}**"
-                    )
+                    with c1:
+                        st.markdown("📄", unsafe_allow_html=True)
 
-                    st.caption(
-                        f"{document.get('type', 'N/D')} · "
-                        f"{document.get('pages', 0)} páginas · "
-                        f"{document.get('chunks', 0)} chunks"
-                    )
+                    with c2:
+                        st.write(f"**{document.get('name', 'Documento')}**")
+                        st.caption(
+                            f"{document.get('type', 'N/D')} · "
+                            f"{document.get('pages', 0)} páginas · "
+                            f"{document.get('chunks', 0)} chunks"
+                        )
 
-                with c3:
-                    status = document.get(
-                        "status",
-                        "N/D",
-                    )
+                    with c3:
+                        status = document.get("status", "N/D")
+                        if status == "Indexado":
+                            st.success(status)
+                        else:
+                            st.warning(status)
 
-                    if status == "Indexado":
-                        st.success(status)
-                    else:
-                        st.warning(status)
+        except Exception as exc:
+            st.error(f"Erro ao carregar documentos: {exc}")
 
-    except Exception as exc:
-        st.error(
-            f"Erro ao carregar documentos: {exc}"
+    with right:
+        st.markdown(
+            """
+            <div class="card">
+                <div class="section-title">
+                    Análise de Risco IA
+                </div>
+                <div style="font-size:3rem; font-weight:800; text-align:center; margin:1rem 0;">
+                    IA
+                </div>
+                <div style="text-align:center; color:#6c7890;">
+                    análise disponível
+                </div>
+                <hr>
+                <div>
+                    Alto risco
+                    <b style="float:right;">-</b>
+                </div>
+                <div>
+                    Médio risco
+                    <b style="float:right;">-</b>
+                </div>
+                <div>
+                    Baixo risco
+                    <b style="float:right;">-</b>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-  # ============================================================
-# LATERAL DASHBOARD
-# ============================================================
+        st.markdown("<br>", unsafe_allow_html=True)
 
-with right if 'right' in locals() else st.sidebar:
+        st.markdown(
+            """
+            <div class="card">
+                <div class="section-title">
+                    Status da Plataforma
+                </div>
+                <p>✅ Banco de dados operacional</p>
+                <p>✅ RAG disponível</p>
+                <p>✅ Retriever/Reranker disponível</p>
+                <p>✅ Orchestrator carregado</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    st.markdown(
-        """
-        <div class="card">
-            <div class="section-title">
-                Analise de Risco IA
+        st.markdown(
+            """
+            <div class="footer-note">
+                Assistente Jurídico IA &middot;
+                RAG + Multiagentes + Evidências &middot; V3.1
             </div>
-            <div style="font-size:3rem; font-weight:800; text-align:center; margin:1rem 0;">
-                IA
-            </div>
-            <div style="text-align:center; color:#6c7890;">
-                analise disponivel
-            </div>
-            <hr>
-            <div>
-                Alto risco
-                <b style="float:right;">-</b>
-            </div>
-            <div>
-                Medio risco
-                <b style="float:right;">-</b>
-            </div>
-            <div>
-                Baixo risco
-                <b style="float:right;">-</b>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+            """,
+            unsafe_allow_html=True,
+        )
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    st.markdown(
-        """
-        <div class="card">
-            <div class="section-title">
-                Pesquisas Juridicas Recentes
-            </div>
-            <p>
-                <b>Jurisprudencia sobre danos morais</b>
-                <br>
-                <small>Fonte a consultar</small>
-            </p>
-            <hr>
-            <p>
-                <b>Prazo para interposicao de recurso</b>
-                <br>
-                <small>Fonte a consultar</small>
-            </p>
-            <hr>
-            <p>
-                <b>Responsabilidade civil do fornecedor</b>
-                <br>
-                <small>Fonte a consultar</small>
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    st.markdown(
-        """
-        <div class="card">
-            <div class="section-title">
-                Status da Plataforma
-            </div>
-            <p>Banco de dados operacional</p>
-            <p>RAG disponivel</p>
-            <p>Retriever/Reranker disponivel</p>
-            <p>Orchestrator carregado</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-        <div class="footer-note">
-            Assistente Juridico IA &middot;
-            RAG + Multiagentes + Evidencias &middot; V3.1
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 # ============================================================
-# ASSISTENTE IA
+# ASSISTENTE IA (CHAT)
 # ============================================================
 
-elif page == "Assistente IA" if 'page' in locals() else True:
-
+elif page == "Assistente IA":
     st.markdown(
         """
         <div class="hero">
-            <h1>Assistente Juridico IA</h1>
+            <h1>Assistente Jurídico IA</h1>
             <p>
-                Analise documentos, consulte sua base juridica
-                e obtenha respostas fundamentadas em evidencias.
+                Analise documentos, consulte sua base jurídica
+                e obtenha respostas fundamentadas em evidências.
             </p>
         </div>
         """,
@@ -1198,7 +851,6 @@ elif page == "Assistente IA" if 'page' in locals() else True:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Historico
     if 'messages' in st.session_state:
         for msg in st.session_state.messages:
             with st.chat_message(msg["role"]):
@@ -1206,40 +858,28 @@ elif page == "Assistente IA" if 'page' in locals() else True:
     else:
         st.session_state.messages = []
 
-    pending = st.session_state.pop(
-        "pending_question",
-        None,
-    )
-
-    q = st.chat_input(
-        "Pergunte sobre seus documentos ou sobre direito..."
-    )
-
+    pending = st.session_state.pop("pending_question", None)
+    q = st.chat_input("Pergunte sobre seus documentos ou sobre direito...")
     q = q or pending
 
     if q:
         q = str(q).strip()
 
         if q:
-            st.session_state.messages.append(
-                {
-                    "role": "user",
-                    "content": q,
-                }
-            )
+            st.session_state.messages.append({
+                "role": "user",
+                "content": q,
+            })
 
             with st.chat_message("user"):
                 st.markdown(q)
 
             with st.chat_message("assistant"):
-                with st.spinner(
-                    "Analisando -> Guard -> RAG -> "
-                    "Retriever -> Reranker -> Agente -> LLM..."
-                ):
+                with st.spinner("Analisando -> Guard -> RAG -> Retriever -> Reranker -> Agente -> LLM..."):
                     try:
                         result = call_orchestrator(
                             query=q,
-                            org_id=user.get("organization_id") if 'user' in locals() else None,
+                            org_id=user.get("organization_id"),
                             mode="auto",
                             top_k=8,
                             rerank_k=5,
@@ -1247,55 +887,43 @@ elif page == "Assistente IA" if 'page' in locals() else True:
                     except Exception as e:
                         result = {"answer": f"Erro ao executar o orquestrador: {e}"}
 
-                response = str(
-                    result.get("answer", "") or ""
-                ).strip()
+                response = str(result.get("answer", "") or "").strip()
 
                 if response:
                     st.markdown(response)
                 else:
                     st.warning(
-                        "A execucao terminou sem uma "
-                        "resposta textual. As evidencias "
-                        "recuperadas permanecem disponiveis abaixo."
+                        "A execução terminou sem uma "
+                        "resposta textual. As evidências "
+                        "recuperadas permanecem disponíveis abaixo."
                     )
 
-                if 'render_citations' in globals():
-                    render_citations(result.get("citations"))
-
-                if 'render_diagnostic' in globals():
-                    render_diagnostic(result)
+                render_citations(result.get("citations"))
+                render_diagnostic(result)
 
                 if result.get("error"):
-                    with st.expander("Detalhes tecnicos"):
+                    with st.expander("Detalhes técnicos"):
                         st.code(str(result["error"]))
 
-                # Auditoria
                 try:
-                    if 'audit' in globals():
-                        audit(
-                            user if 'user' in locals() else {},
-                            "rag.ask",
-                            "conversation",
-                            None,
-                            {
-                                "query": q,
-                                "agent": result.get("agent"),
-                                "intent": result.get("intent"),
-                            },
-                        )
+                    audit(
+                        user,
+                        "rag.ask",
+                        "conversation",
+                        None,
+                        {
+                            "query": q,
+                            "agent": result.get("agent"),
+                            "intent": result.get("intent"),
+                        },
+                    )
                 except Exception:
                     pass
 
-            st.session_state.messages.append(
-                {
-                    "role": "assistant",
-                    "content": (
-                        response
-                        or "Execucao sem resposta textual."
-                    ),
-                }
-            )
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": response or "Execução sem resposta textual.",
+            })
 
 
 # ============================================================
@@ -1303,7 +931,6 @@ elif page == "Assistente IA" if 'page' in locals() else True:
 # ============================================================
 
 elif page == "Documentos":
-
     st.markdown(
         """
         <div class="hero">
@@ -1324,10 +951,7 @@ elif page == "Documentos":
         type=["pdf", "docx", "txt"],
     )
 
-    use_ocr = st.checkbox(
-        "Usar OCR quando necessário",
-        True,
-    )
+    use_ocr = st.checkbox("Usar OCR quando necessário", True)
 
     if up:
         if st.button("🚀 Processar e indexar", type="primary"):
@@ -1342,10 +966,10 @@ elif page == "Documentos":
                     result = safe_dict(
                         ingest_document(
                             up,
-                            user.get("organization_id") if 'user' in locals() else None,
+                            user.get("organization_id"),
                             use_ocr=use_ocr,
                         )
-                    ) if 'ingest_document' in globals() else {}
+                    )
 
                     status.update(
                         label="Documento processado com sucesso",
@@ -1369,7 +993,7 @@ elif page == "Documentos":
     st.markdown("### Documentos disponíveis")
 
     try:
-        documents = list_documents(user.get("organization_id") if 'user' in locals() else None) if 'list_documents' in globals() else []
+        documents = list_documents(user.get("organization_id"))
 
         if not documents:
             st.info("Nenhum documento encontrado.")
@@ -1388,100 +1012,16 @@ elif page == "Documentos":
                     st.write(f"**{document.get('name', 'Documento')}**")
                     st.caption(
                         f"{document.get('type', 'N/D')} - "
-                        f"{document.get('status', 'N/D')} - "
                         f"{document.get('pages', 0)} páginas - "
                         f"{document.get('chunks', 0)} chunks"
                     )
 
                 with c3:
-                    st.write(document.get("status", "N/D"))
+                    status_doc = document.get("status", "N/D")
+                    if status_doc == "Indexado":
+                        st.success(status_doc)
+                    else:
+                        st.warning(status_doc)
 
     except Exception as exc:
         st.error(f"Erro ao carregar documentos: {exc}")
-
-
-# ============================================================
-# ANÁLISE DE RISCO
-# ============================================================
-
-elif page == "Análise de Risco":
-
-    st.markdown(
-        """
-        <div class="hero">
-            <h1>🛡️ Análise de Risco IA</h1>
-            <p>Agente de Risco + RAG + evidências documentais.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    text = st.text_area(
-        "Cole o texto ou resumo do documento",
-        height=260,
-        placeholder="Cole aqui o conteúdo do contrato, petição ou documento...",
-    )
-
-    if st.button("🔍 Analisar riscos", type="primary"):
-        if not text.strip():
-            st.warning("Informe o texto para análise.")
-        else:
-            with st.spinner("Agente de Risco analisando evidências..."):
-                try:
-                    result = safe_dict(
-                        risk_analysis(
-                            query="Analise os principais riscos jurídicos...",
-                            org_id=user.get("organization_id") if 'user' in locals() else None,
-                            extra_context=text,
-                        )
-                    ) if 'risk_analysis' in globals() else {}
-
-                    answer = str(result.get("answer", "") or "").strip()
-                    if answer:
-                        st.markdown(answer)
-                    else:
-                        st.warning("O agente terminou sem resposta textual.")
-
-                    if 'render_citations' in globals():
-                        render_citations(result.get("citations"))
-                    if 'render_diagnostic' in globals():
-                        render_diagnostic(result)
-
-                except Exception as exc:
-                    st.error(f"Erro na análise de risco: {exc}")
-                    st.code(traceback.format_exc())
-
-
-# ============================================================
-# CONFIGURAÇÕES
-# ============================================================
-
-elif page == "Configurações":
-
-    st.markdown(
-        """
-        <div class="hero">
-            <h1>⚙️ Configurações</h1>
-            <p>Controle LLM, RAG, segurança, agentes e parâmetros.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    c1, c2 = st.columns(2)
-
-    with c1:
-        st.markdown("### 🤖 Inteligência Artificial")
-        llm = st.selectbox("LLM", ["Modo Demo", "Gemini", "OpenAI"])
-        top_k = st.number_input("Retriever Top-K", min_value=1, max_value=50, value=8)
-        rerank_k = st.number_input("Reranker Top-K", min_value=1, max_value=20, value=5)
-
-    with c2:
-        st.markdown("### 🛡️ Segurança")
-        citations_required = st.checkbox("Citações obrigatórias", True)
-        evaluation_enabled = st.checkbox("Evaluation habilitado", True)
-        guard_enabled = st.checkbox("Guard Agent habilitado", True)

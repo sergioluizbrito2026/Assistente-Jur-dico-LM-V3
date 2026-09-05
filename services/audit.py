@@ -2,17 +2,24 @@ from __future__ import annotations
 
 """
 Assistente Jurídico SaaS IA V3.1
-services/auth.py
+services/audit.py
 
-Autenticação e controle de sessão do usuário.
+Módulo de auditoria e registro de logs de ações do sistema.
 """
 
-from typing import Any, Dict, Optional
-
+from typing import Any, Optional
 import streamlit as st
 
-from db import get_connection
-from security.passwords import verify_password
+def audit(action: str, details: Optional[str] = None, user_id: Optional[int] = None) -> None:
+    """
+    Registra um evento de auditoria no sistema.
+    """
+    # Implementação básica do registro de auditoria
+    try:
+        # Você pode adaptar para salvar no banco de dados ou logs se necessário
+        print(f"[AUDIT] Ação: {action} | Detalhes: {details} | Usuário: {user_id}")
+    except Exception as e:
+        print(f"[AUDIT ERROR] {e}")
 
 # ============================================================
 # CONFIGURAÇÃO

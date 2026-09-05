@@ -1,29 +1,17 @@
 """
-Assistente Jurídico SaaS IA V3
+Assistente Jurídico SaaS IA V3.1
 services/auth.py
 
-Serviço de autenticação da plataforma.
+Autenticação e controle de sessão do usuário.
+"""
 
-Responsabilidades:
-
-* autenticação de usuários;
-* validação de credenciais;
-* gerenciamento da sessão Streamlit;
-* recuperação do usuário atual;
-* logout;
-* isolamento por organização;
-* tratamento seguro de erros;
-* compatibilidade com o app.py V3.
-  """
-
-from __future__ import annotations
+from **future** import annotations
 
 from typing import Any, Dict, Optional
 
 import streamlit as st
 
-from db import get_connection
-from security.passwords import verify_password
+from db import get_user_by_email
 
 # ============================================================
 
@@ -31,110 +19,7 @@ from security.passwords import verify_password
 
 # ============================================================
 
-SESSION_USER_KEY = "user"
-
-# ============================================================
-
-# NORMALIZAÇÃO
-
-# ============================================================
-
-def _normalize_email(email: Any) -> str:
-"""
-Normaliza o e-mail antes da consulta.
-"""
-return str(email or "").strip().lower()
-
-def _normalize_password(password: Any) -> str:
-"""
-Normaliza a senha sem alterar seu conteúdo interno.
-"""
-return str(password or "")
-
-# ============================================================
-
-# AUTENTICAÇÃO
-
-# ============================================================
-
-def authenticate(
-email: str,
-password: str,
-) -> bool:
-"""
-Autentica um usuário.
-
-```
-Retorna:
-    True  -> autenticação realizada.
-    False -> credenciais inválidas.
-"""
-
-email = _normalize_email(email)
-password = _normalize_password(password)
-
-if not email or not password:
-    return False
-
-try:
-    with get_connection() as c:
-
-        row = c.execute(
-            """
-            SELECT
-                id,
-                organization_id,
-                name,
-                email,
-                password_hash,
-                role,
-                created_at
-            FROM users
-            WHERE LOWER(email) = ?
-            LIMIT 1
-            """,
-            (email,),
-        ).fetchone()
-
-    if not row:
-        return False
-
-    password_hash = row["password_hash"]
-
-    if not password_hash:
-        return False
-
-    try:
-        valid_password = verify_password(
-            password,
-            password_hash,
-        )
-    except Exception:
-        return False
-
-    if not valid_password:
-        return False
-
-    # Converte Row para dicionário.
-    user = dict(row)
-
-    # Nunca guardar o hash da senha na sessão.
-    user.pop("password_hash", None)
-
-    # Salva usuário autenticado.
-    st.session_state[SESSION_USER_KEY] = user
-
-    # Indicadores auxiliares.
-    st.session_state["authenticated"] = True
-    st.session_state["org_id"] = user.get(
-        "organization_id"
-    )
-
-    return True
-
-except Exception:
-    return False
-```
+SESSION_USER_KEY = "current_user"
 
 # ============================================================
 
@@ -147,12 +32,11 @@ def get_current_user() -> Optional[Dict[str, Any]]:
 Retorna o usuário atualmente autenticado.
 
 ```
-Retorna None quando não existe sessão válida.
+Retorna:
+    dict com os dados do usuário ou None.
 """
 
-user = st.session_state.get(
-    SESSION_USER_KEY
-)
+user = st.session_state.get(SESSION_USER_KEY)
 
 if not user:
     return None
@@ -165,7 +49,116 @@ return user
 
 # ============================================================
 
-# STATUS DE AUTENTICAÇÃO
+# AUTENTICAÇÃO
+
+# ============================================================
+
+def authenticate(
+email: str,
+password: str,
+) -> bool:
+"""
+Autentica um usuário utilizando e-mail e senha.
+
+```
+Retorna:
+    True  -> autenticação realizada.
+    False -> credenciais inválidas.
+"""
+
+email = str(email or "").strip().lower()
+password = str(password or "")
+
+if not email or not password:
+    return False
+
+try:
+    user = get_user_by_email(email)
+except Exception:
+    return False
+
+if not user:
+    return False
+
+password_hash = user.get("password_hash")
+
+if not password_hash:
+    return False
+
+try:
+    from security.passwords import verify_password
+
+    valid = verify_password(
+        password,
+        password_hash,
+    )
+
+except Exception:
+    return False
+
+if not valid:
+    return False
+
+st.session_state[SESSION_USER_KEY] = dict(user)
+
+st.session_state["authenticated"] = True
+
+st.session_state["user_id"] = user.get("id")
+
+st.session_state["organization_id"] = user.get(
+    "organization_id"
+)
+
+st.session_state["perfil_nome"] = user.get(
+    "name",
+    "",
+)
+
+st.session_state["perfil_email"] = user.get(
+    "email",
+    "",
+)
+
+st.session_state["perfil_role"] = user.get(
+    "role",
+    "",
+)
+
+return True
+```
+
+# ============================================================
+
+# LOGOUT
+
+# ============================================================
+
+def logout() -> None:
+"""
+Encerra a sessão do usuário atual.
+"""
+
+```
+keys_to_remove = [
+    SESSION_USER_KEY,
+    "authenticated",
+    "user_id",
+    "organization_id",
+    "perfil_nome",
+    "perfil_email",
+    "perfil_role",
+]
+
+for key in keys_to_remove:
+    st.session_state.pop(
+        key,
+        None,
+    )
+```
+
+# ============================================================
+
+# VERIFICAÇÃO DE AUTENTICAÇÃO
 
 # ============================================================
 
@@ -179,8 +172,10 @@ user = get_current_user()
 
 return bool(
     user
-    and user.get("id")
-    and user.get("organization_id")
+    and st.session_state.get(
+        "authenticated",
+        False,
+    )
 )
 ```
 
@@ -190,9 +185,9 @@ return bool(
 
 # ============================================================
 
-def get_current_org_id() -> Optional[int]:
+def get_current_organization_id() -> Optional[int]:
 """
-Retorna o ID da organização do usuário autenticado.
+Retorna o ID da organização do usuário atual.
 """
 
 ```
@@ -201,12 +196,17 @@ user = get_current_user()
 if not user:
     return None
 
+organization_id = user.get(
+    "organization_id"
+)
+
+if organization_id is None:
+    return None
+
 try:
-    return int(
-        user["organization_id"]
-    )
+    return int(organization_id)
+
 except (
-    KeyError,
     TypeError,
     ValueError,
 ):
@@ -230,12 +230,15 @@ user = get_current_user()
 if not user:
     return None
 
+user_id = user.get("id")
+
+if user_id is None:
+    return None
+
 try:
-    return int(
-        user["id"]
-    )
+    return int(user_id)
+
 except (
-    KeyError,
     TypeError,
     ValueError,
 ):
@@ -244,77 +247,94 @@ except (
 
 # ============================================================
 
-# LOGOUT
+# PERFIL
 
 # ============================================================
 
-def logout() -> None:
+def get_current_user_name() -> str:
 """
-Encerra a sessão atual.
-"""
-
-```
-st.session_state.pop(
-    SESSION_USER_KEY,
-    None,
-)
-
-st.session_state.pop(
-    "authenticated",
-    None,
-)
-
-st.session_state.pop(
-    "org_id",
-    None,
-)
-```
-
-# ============================================================
-
-# LIMPEZA DA SESSÃO
-
-# ============================================================
-
-def clear_auth_session() -> None:
-"""
-Alias para limpeza da sessão de autenticação.
-"""
-
-```
-logout()
-```
-
-# ============================================================
-
-# CONTEXTO DE AUTENTICAÇÃO
-
-# ============================================================
-
-def get_auth_context() -> Dict[str, Any]:
-"""
-Retorna informações estruturadas da sessão atual.
+Retorna o nome do usuário atual.
 """
 
 ```
 user = get_current_user()
 
 if not user:
-    return {
-        "authenticated": False,
-        "user": None,
-        "user_id": None,
-        "organization_id": None,
-        "role": None,
-    }
+    return ""
 
-return {
-    "authenticated": True,
-    "user": user,
-    "user_id": get_current_user_id(),
-    "organization_id": get_current_org_id(),
-    "role": user.get("role"),
-}
+return str(
+    user.get(
+        "name",
+        "",
+    )
+    or ""
+)
+```
+
+def get_current_user_email() -> str:
+"""
+Retorna o e-mail do usuário atual.
+"""
+
+```
+user = get_current_user()
+
+if not user:
+    return ""
+
+return str(
+    user.get(
+        "email",
+        "",
+    )
+    or ""
+)
+```
+
+def get_current_user_role() -> str:
+"""
+Retorna o perfil/função do usuário atual.
+"""
+
+```
+user = get_current_user()
+
+if not user:
+    return ""
+
+return str(
+    user.get(
+        "role",
+        "",
+    )
+    or ""
+)
+```
+
+# ============================================================
+
+# PROTEÇÃO DE PÁGINA
+
+# ============================================================
+
+def require_authentication() -> bool:
+"""
+Verifica autenticação.
+
+```
+Retorna:
+    True  -> usuário autenticado.
+    False -> usuário não autenticado.
+"""
+
+if is_authenticated():
+    return True
+
+st.warning(
+    "É necessário realizar o login para acessar esta área."
+)
+
+return False
 ```
 
 # ============================================================
@@ -326,25 +346,25 @@ return {
 def self_test() -> Dict[str, Any]:
 """
 Teste estrutural do módulo.
-
-```
-Não executa autenticação real.
 """
 
-required = [
+```
+required_functions = [
     "authenticate",
     "get_current_user",
-    "is_authenticated",
-    "get_current_org_id",
-    "get_current_user_id",
     "logout",
-    "clear_auth_session",
-    "get_auth_context",
+    "is_authenticated",
+    "get_current_organization_id",
+    "get_current_user_id",
+    "get_current_user_name",
+    "get_current_user_email",
+    "get_current_user_role",
+    "require_authentication",
 ]
 
-missing = [
+missing_functions = [
     name
-    for name in required
+    for name in required_functions
     if name not in globals()
 ]
 
@@ -352,11 +372,11 @@ return {
     "module": "services.auth",
     "status": (
         "ok"
-        if not missing
+        if not missing_functions
         else "error"
     ),
-    "required_functions": required,
-    "missing_functions": missing,
+    "required_functions": required_functions,
+    "missing_functions": missing_functions,
 }
 ```
 
@@ -372,7 +392,7 @@ if **name** == "**main**":
 result = self_test()
 
 print("=" * 60)
-print("AUTH.PY V3 - SELF TEST")
+print("AUTH.PY V3.1 - SELF TEST")
 print("=" * 60)
 
 print(
@@ -388,6 +408,4 @@ print(
     f"Funções ausentes: "
     f"{result['missing_functions']}"
 )
-
-print("=" * 60)
-
+```

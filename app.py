@@ -511,8 +511,19 @@ page = st.session_state.page
 # DASHBOARD
 # ============================================================
 if page == "Dashboard":
-    st.title("⚖️ JURÍDICO SaaS")
-    st.caption("Inteligência Artificial v3.1 — Painel de Controle Consolidado")
+    
+    # Cabeçalho com Seletor de Período (Item 7)
+    header_col1, header_col2 = st.columns([4, 1])
+    with header_col1:
+        st.title("⚖️ JURÍDICO SaaS")
+        st.caption("Inteligência Artificial v3.1 — Painel de Controle Consolidado")
+    with header_col2:
+        periodo = st.selectbox(
+            "Período:",
+            ["Últimos 7 dias", "Últimos 30 dias", "Este mês", "Hoje"],
+            label_visibility="collapsed"
+        )
+
     st.markdown("<br>", unsafe_allow_html=True)
 
     try:
@@ -529,23 +540,25 @@ if page == "Dashboard":
     ind_casos_ativos = cases_count if cases_count > 0 else 42
     ind_documentos = documents_count if documents_count > 0 else 248
 
+    # 1. Cards do Topo com Variação (Item 1)
     metrics_cols = st.columns(6)
     cards_data = [
-        ("📁 Casos Ativos", str(ind_casos_ativos)),
-        ("📄 Documentos", str(ind_documentos)),
-        ("🤖 Análises IA", "386"),
-        ("⚠️ Riscos", "27"),
-        ("🔎 Consultas", "521"),
-        ("⏱️ Pendentes", "13"),
+        ("📁 Casos Ativos", str(ind_casos_ativos), "Total geral"),
+        ("📄 Documentos", str(ind_documentos), "Base indexada"),
+        ("🤖 Análises IA", "386", "↑ 18,4% esta semana"),
+        ("⚠️ Riscos", "27", "↑ 5 este mês"),
+        ("🔎 Consultas", "521", "Ativas no periodo"),
+        ("⏱️ Pendentes", "13", "↓ 3 desde ontem"),
     ]
 
-    for col, (label, val) in zip(metrics_cols, cards_data):
+    for col, (label, val, sub) in zip(metrics_cols, cards_data):
         with col:
             st.markdown(
                 f"""
                 <div class="metric-card">
                     <div class="metric-label">{label}</div>
                     <div class="metric-value">{val}</div>
+                    <div style="font-size:0.68rem; color:#6c7890; margin-top:0.2rem;">{sub}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -583,51 +596,86 @@ if page == "Dashboard":
                 st.rerun()
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div class="section-title">📊 Visão Geral & Estatísticas</div>', unsafe_allow_html=True)
-    g1, g2, g3 = st.columns(3)
 
-    with g1:
-        with st.container(border=True):
-            st.markdown("**Casos por Status**")
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("🔵 **Ativo** (18)")
-            st.progress(18 / 25)
-            st.markdown("🟡 **Em análise** (10)")
-            st.progress(10 / 25)
-            st.markdown("🔵 **Em andamento** (7)")
-            st.progress(7 / 25)
-            st.markdown("⚪ **Concluído** (5)")
-            st.progress(5 / 25)
-            st.markdown("📁 **Arquivado** (2)")
-            st.progress(2 / 25)
+    # 2 e 3. Organização em Duas Colunas Equivalentes (Eliminando Espaços Vazios - Item 6)
+    col_left, col_right = st.columns(2)
 
-    with g2:
+    with col_left:
+        # Bloco de Casos por Status (Item 2)
         with st.container(border=True):
-            st.markdown("**Riscos Identificados**")
+            sub_c1, sub_c2 = st.columns([3, 1])
+            with sub_c1:
+                st.markdown("**📊 Casos por Status**")
+            with sub_c2:
+                st.caption("42 casos totais")
+            
             st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("🟢 **Baixo** (8)")
-            st.progress(8 / 15)
-            st.markdown("🟡 **Médio** (12)")
-            st.progress(12 / 15)
-            st.markdown("🔴 **Alto** (7)")
-            st.progress(7 / 15)
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("Ativo &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; `████████████████` **18**")
+            st.markdown("Em análise &nbsp;&nbsp; `██████████` **10**")
+            st.markdown("Em andamento `███████` **7**")
+            st.markdown("Concluído &nbsp;&nbsp;&nbsp; `█████` **5**")
+            st.markdown("Arquivado &nbsp;&nbsp;&nbsp;&nbsp; `██` **2**")
 
-    with g3:
+        # Bloco de Insights da IA (Item 4)
         with st.container(border=True):
-            st.markdown("**Atividade da IA (Semanal)**")
+            st.markdown("**🤖 Insights da IA**")
+            st.caption("3 novos insights identificados hoje")
+            st.markdown("🔴 **Processo #2026-0145**<br><span style='color:#6c7890; font-size:0.85rem;'>Prazo processual próximo.</span>", unsafe_allow_html=True)
+            st.markdown("🟡 **Processo #2026-0182**<br><span style='color:#6c7890; font-size:0.85rem;'>Documento pendente de análise.</span>", unsafe_allow_html=True)
+            st.markdown("🟢 **Processo #2026-0119**<br><span style='color:#6c7890; font-size:0.85rem;'>Nenhum risco relevante identificado.</span>", unsafe_allow_html=True)
+            if st.button("Ver todos os insights →", key="btn_insights", use_container_width=True):
+                st.session_state.page = "Assistente IA"
+                st.rerun()
+
+    with col_right:
+        # Bloco de Riscos Identificados com Ação Direta (Item 3)
+        with st.container(border=True):
+            st.markdown("**⚠️ Riscos Identificados**")
             st.markdown("<br>", unsafe_allow_html=True)
-            st.caption("Segunda-feira: **45 requisições**")
-            st.progress(45 / 100)
-            st.caption("Terça-feira: **68 requisições**")
-            st.progress(68 / 100)
-            st.caption("Quarta-feira: **82 requisições**")
-            st.progress(82 / 100)
-            st.caption("Quinta-feira: **55 requisições**")
-            st.progress(55 / 100)
-            st.caption("Sexta-feira: **90 requisições**")
-            st.progress(90 / 100)
+            st.markdown("🟢 **Baixo** &nbsp;— `8`")
+            st.markdown("🟡 **Médio** — `12`")
+            st.markdown("🔴 **Alto** &nbsp;&nbsp;— `7`")
+            st.markdown("<br>")
+            st.markdown("⚠️ **7 casos apresentam risco alto**")
+            if st.button("Ver casos de alto risco →", key="btn_riscos", use_container_width=True):
+                st.session_state.page = "Assistente IA"
+                st.session_state.pending_question = "Mostre todos os processos classificados com risco alto."
+                st.rerun()
+
+        # Bloco de Próximos Prazos (Item 5 - Obrigatório Jurídico)
+        with st.container(border=True):
+            st.markdown("**⏰ Próximos Prazos**")
+            st.caption("5 prazos monitorados próximos")
+            st.markdown(
+                """
+                | Processo | Prazo | Situação |
+                | :--- | :--- | :--- |
+                | **#2026-0145** | 2 dias | 🔴 Urgente |
+                | **#2026-0182** | 5 dias | 🟡 Atenção |
+                | **#2026-0191** | 12 dias | 🟢 Normal |
+                """,
+                unsafe_allow_html=True
+            )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 8. Gráfico de Linha Executivo de Atividade da IA (Largura Total)
+    with st.container(border=True):
+        st.markdown("**📈 Atividade da IA — Últimos 7 Dias**")
+        st.caption("Volume de interações e consultas processadas pela inteligência artificial")
+        
+        # Gráfico executivo estilizado limpo em código estruturado profissional
+        chart_data = """
+        Requisições IA
+         100 ┤                         ╭── (90)
+          80 ┤                  ╭──────╯ (82)
+          60 ┤          ╭───────╯ (68)
+          40 ┤────╮─────╯ (55)
+          20 ┤    ╰──── (45)
+             └───────────────────────────────
+                Seg  Ter  Qua  Qui  Sex
+        """
+        st.code(chart_data, language="text")
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(

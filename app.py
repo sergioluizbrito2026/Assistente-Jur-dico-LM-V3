@@ -511,8 +511,6 @@ page = st.session_state.page
 # DASHBOARD
 # ============================================================
 if page == "Dashboard":
-    import plotly.express as px
-
     st.title("⚖️ JURÍDICO SaaS")
     st.caption("Inteligência Artificial v3.1 — Painel de Controle Consolidado")
     st.markdown("<br>", unsafe_allow_html=True)
@@ -588,43 +586,48 @@ if page == "Dashboard":
     st.markdown('<div class="section-title">📊 Visão Geral & Estatísticas</div>', unsafe_allow_html=True)
     g1, g2, g3 = st.columns(3)
 
-    plotly_config = {
-        "staticPlot": True
-    }
-
     with g1:
         with st.container(border=True):
             st.markdown("**Casos por Status**")
-            fig1 = px.bar(
-                x=["Ativo", "Em análise", "Em andamento", "Concluído", "Arquivado"],
-                y=[18, 10, 7, 5, 2],
-                labels={"x": "Status", "y": "Quantidade"}
-            )
-            fig1.update_layout(xaxis=dict(fixedrange=True), yaxis=dict(fixedrange=True), margin=dict(t=20, b=20, l=20, r=20))
-            st.plotly_chart(fig1, use_container_width=True, config=plotly_config)
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("🔵 **Ativo** (18)")
+            st.progress(18 / 25)
+            st.markdown("🟡 **Em análise** (10)")
+            st.progress(10 / 25)
+            st.markdown("🔵 **Em andamento** (7)")
+            st.progress(7 / 25)
+            st.markdown("⚪ **Concluído** (5)")
+            st.progress(5 / 25)
+            st.markdown("📁 **Arquivado** (2)")
+            st.progress(2 / 25)
 
     with g2:
         with st.container(border=True):
             st.markdown("**Riscos Identificados**")
-            fig2 = px.bar(
-                x=["Baixo", "Médio", "Alto"],
-                y=[8, 12, 7],
-                labels={"x": "Nível de Risco", "y": "Quantidade"}
-            )
-            fig2.update_layout(xaxis=dict(fixedrange=True), yaxis=dict(fixedrange=True), margin=dict(t=20, b=20, l=20, r=20))
-            st.plotly_chart(fig2, use_container_width=True, config=plotly_config)
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("🟢 **Baixo** (8)")
+            st.progress(8 / 15)
+            st.markdown("🟡 **Médio** (12)")
+            st.progress(12 / 15)
+            st.markdown("🔴 **Alto** (7)")
+            st.progress(7 / 15)
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
 
     with g3:
         with st.container(border=True):
             st.markdown("**Atividade da IA (Semanal)**")
-            fig3 = px.line(
-                x=["Seg", "Ter", "Qua", "Qui", "Sex"],
-                y=[45, 68, 82, 55, 90],
-                markers=True,
-                labels={"x": "Dia", "y": "Atividades"}
-            )
-            fig3.update_layout(xaxis=dict(fixedrange=True), yaxis=dict(fixedrange=True), margin=dict(t=20, b=20, l=20, r=20))
-            st.plotly_chart(fig3, use_container_width=True, config=plotly_config)
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.caption("Segunda-feira: **45 requisições**")
+            st.progress(45 / 100)
+            st.caption("Terça-feira: **68 requisições**")
+            st.progress(68 / 100)
+            st.caption("Quarta-feira: **82 requisições**")
+            st.progress(82 / 100)
+            st.caption("Quinta-feira: **55 requisições**")
+            st.progress(55 / 100)
+            st.caption("Sexta-feira: **90 requisições**")
+            st.progress(90 / 100)
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(

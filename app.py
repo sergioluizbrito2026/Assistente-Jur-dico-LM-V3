@@ -308,17 +308,18 @@ def call_orchestrator(
 
         result = safe_dict(orchestrate(**filtered))
 
+        # CORREÇÃO (item 2.3): não preencher citações/guard/confiança
+        # com dados fabricados. O orchestrator V3.2 corrigido sempre
+        # retorna essas chaves com valores reais (mesmo que vazios/
+        # neutros) — só cobrimos o caso de um retorno malformado.
         result.setdefault("answer", "")
-        result.setdefault("citations", [
-            {"id": 1, "document": "contrato_cliente.pdf", "page": 7, "content": "...cláusula de rescisão contratual...", "relevance": "94%"},
-            {"id": 2, "document": "peticao_inicial.pdf", "page": 3, "content": "...alegação de descumprimento de prazos...", "relevance": "89%"}
-        ])
-        result.setdefault("retrieved", [1, 2, 3, 4, 5])
-        result.setdefault("reranked", [1, 2, 3])
-        result.setdefault("agent", "Agente Jurídico")
-        result.setdefault("intent", "legal_query")
-        result.setdefault("confidence", "91%")
-        result.setdefault("guard", {"allowed": True, "reason": "Evidências validadas com sucesso na base jurídica."})
+        result.setdefault("citations", [])
+        result.setdefault("retrieved", [])
+        result.setdefault("reranked", [])
+        result.setdefault("agent", "general")
+        result.setdefault("intent", "general")
+        result.setdefault("guard", {"approved": False, "issues": ["Guard não executado."]})
+        result.setdefault("evaluation", {})
 
         return result
 
@@ -364,30 +365,60 @@ def render_citations(citations):
 
 
 def render_diagnostic(result):
+    """
+    CORREÇÃO (item 2.2 + 2.3): antes mostrava sempre "🟢 Aprovada"
+    e um checklist estático de 4 itens, independente do que a
+    resposta realmente continha. Agora usa o resultado real de
+    guard_agent() (que por sua vez usa evaluate_answer()).
+    """
     result = safe_dict(result)
+
+    guard = result.get("guard") or {}
+    evaluation = result.get("evaluation") or {}
+
+    agent = str(result.get("agent_label", result.get("agent", "Agente Geral")))
+    latency_ms = result.get("latency_ms")
+    latency = f"{latency_ms} ms" if latency_ms is not None else "N/D"
+
+    overall = evaluation.get("overall")
+    confidence = f"{overall * 100:.1f}%" if isinstance(overall, (int, float)) else "N/D"
 
     with st.expander("🤖 Execução da IA & Segurança (Guard Agent)", expanded=False):
         c1, c2, c3 = st.columns(3)
 
-        agent = str(result.get("agent", "Agente Jurídico"))
-        confidence = str(result.get("confidence", "91%"))
-        latency = result.get("latency_ms", "2,4s")
+        c1.markdown(f"**Agente:** {agent}")
+        c2.markdown(f"**Latência:** {latency}")
+        c3.markdown(f"**RAG:** {'🟢 Ativo' if result.get('evidence_count', 0) > 0 else '🟡 Sem evidências'}")
 
-        c1.markdown(f"**Modelo:** Gemini 1.5 Pro")
-        c2.markdown(f"**Agente:** {agent}")
-        c3.markdown(f"**RAG:** 🟢 Ativo")
-
-        c1.markdown(f"**Documentos recuperados:** 5")
-        c2.markdown(f"**Chunks utilizados:** 8")
-        c3.markdown(f"**Confiança:** {confidence}")
+        c1.markdown(f"**Documentos no contexto:** {result.get('evidence_count', 0)}")
+        c2.markdown(f"**Citações geradas:** {len(result.get('citations', []) or [])}")
+        c3.markdown(f"**Confiança (score real):** {confidence}")
 
         st.markdown("---")
         st.markdown("🛡️ **Segurança da Resposta (Guard Agent)**")
-        st.markdown("Status: <span class='badge-green'>🟢 Aprovada</span>", unsafe_allow_html=True)
-        st.markdown("- ✓ Evidências encontradas na base")
-        st.markdown("- ✓ Resposta rigorosamente baseada no contexto")
-        st.markdown("- ✓ Sem informações fora da base de conhecimento")
-        st.markdown("- ✓ Revisão de segurança concluída com sucesso")
+
+        approved = bool(guard.get("approved", False))
+        issues = guard.get("issues", []) or []
+
+        if approved:
+            st.markdown("Status: <span class='badge-green'>🟢 Aprovada</span>", unsafe_allow_html=True)
+        elif issues:
+            st.markdown("Status: <span class='badge-orange'>🟡 Aprovada com ressalvas</span>", unsafe_allow_html=True)
+        else:
+            st.markdown("Status: <span class='badge-red'>🔴 Não avaliada</span>", unsafe_allow_html=True)
+
+        if issues:
+            for issue in issues:
+                st.markdown(f"- ⚠️ {issue}")
+        else:
+            st.markdown("- ✓ Nenhuma inconsistência identificada pelo Guard Agent.")
+
+        if evaluation:
+            st.caption(
+                f"context_relevance: {evaluation.get('context_relevance', 'N/D')} · "
+                f"citation_coverage: {evaluation.get('citation_coverage', 'N/D')} · "
+                f"groundedness: {evaluation.get('groundedness', 'N/D')}"
+            )
 
         error = result.get("error")
         if error:
@@ -519,7 +550,11 @@ with st.sidebar:
     )
     
     if st.button("🚪 Sair do Sistema", use_container_width=True):
-        st.warning("Sessão encerrada com segurança.")
+        # CORREÇÃO (item 2.8): antes só mostrava um aviso e não
+        # encerrava a sessão de fato. logout() já existia e
+        # funcionava em services.auth, só não era chamado aqui.
+        logout()
+        st.rerun()
 
 
 # ============================================================
@@ -901,11 +936,38 @@ elif page == "Assistente IA":
 
             with st.chat_message("assistant"):
                 with st.spinner("Executando pipeline: RAG → Retriever → Reranker → Agente IA..."):
+                    # CORREÇÃO (item 2.5): o dropdown "Agente:" do painel de
+                    # configuração era puramente decorativo — o orquestrador
+                    # sempre rodava em mode="auto" (decisão só por palavra-chave
+                    # na pergunta). Agora o agente escolhido pelo usuário é
+                    # repassado de verdade para orchestrate(mode=...).
+                    agent_mode_map = {
+                        "Risco": "risk",
+                        "Resumo": "summary",
+                        "Geral": "general",
+                        "Jurídico": "legal",
+                        # "RAG / Base Jurídica" não tem um modo dedicado no
+                        # orquestrador (é sobre a fonte de conhecimento, não
+                        # sobre qual agente/prompt roda) — cai em detecção
+                        # automática por conteúdo da pergunta.
+                        "RAG": "auto",
+                    }
+
+                    selected_agent_label = st.session_state.get(
+                        "sel_agent", "⚖️ Agente Jurídico"
+                    )
+
+                    selected_mode = "auto"
+                    for keyword, mode_value in agent_mode_map.items():
+                        if keyword in selected_agent_label:
+                            selected_mode = mode_value
+                            break
+
                     try:
                         result = call_orchestrator(
                             query=q,
                             org_id=user.get("organization_id"),
-                            mode="auto",
+                            mode=selected_mode,
                             top_k=8,
                             rerank_k=5,
                         )
@@ -915,7 +977,7 @@ elif page == "Assistente IA":
                 raw_response = str(result.get("answer", "") or "").strip()
 
                 # Geração de resposta inteligente baseada no Agente escolhido no topo
-                current_agent = st.session_state.get("sel_agent", "⚖️ Agente Jurídico")
+                current_agent = selected_agent_label
                 
                 if "nenhum provedor LLM está configurado" in raw_response.lower() or "modo demonstração" in raw_response.lower() or not raw_response:
                     if "Risco" in current_agent:
@@ -950,43 +1012,91 @@ elif page == "Assistente IA":
                 st.markdown("### 🤖 Resultado da Análise")
                 res_tab1, res_tab2, res_tab3, res_tab4 = st.tabs(["📋 Resumo", "⚠️ Riscos", "📌 Evidências", "📚 Citações"])
 
+                # CORREÇÃO (item 2.1 + 2.3): as quatro abas abaixo mostravam
+                # dado 100% fabricado (risco fixo "Médio", confiança fixa
+                # "94.5%", citações e evidências de exemplo hardcoded, mesmo
+                # quando a resposta vinha de erro/modo demo). Agora usam
+                # result["guard"], result["evaluation"] e result["citations"]
+                # de verdade, retornados pelo orchestrator corrigido.
+
+                guard = result.get("guard") or {}
+                evaluation = result.get("evaluation") or {}
+                real_citations = result.get("citations") or []
+
+                overall = evaluation.get("overall")
+                confidence_text = f"{overall * 100:.1f}%" if isinstance(overall, (int, float)) else "N/D"
+                guard_approved = bool(guard.get("approved", False))
+                guard_issues = guard.get("issues", []) or []
+
                 with res_tab1:
                     st.markdown("#### Resumo Executivo")
                     st.markdown(response)
-                    
+
                     st.markdown("<br>", unsafe_allow_html=True)
+
+                    if guard_approved:
+                        status_line = "🟢 Guard Agent: <b>Aprovada</b>"
+                    elif guard_issues:
+                        status_line = "🟡 Guard Agent: <b>Aprovada com ressalvas</b>"
+                    else:
+                        status_line = "⚪ Guard Agent: <b>Não avaliada</b>"
+
                     st.markdown(
-                        """
+                        f"""
                         <div style="background:#f0f4f8; padding:10px 14px; border-radius:8px; font-size:0.85rem;">
-                            ⚠️ Risco Global: <b>Médio / Requer Atenção</b> &nbsp;&nbsp;|&nbsp;&nbsp; 
-                            🎯 Confiança da Recuperação RAG: <b>94.5%</b>
+                            {status_line} &nbsp;&nbsp;|&nbsp;&nbsp;
+                            🎯 Score de qualidade (real): <b>{confidence_text}</b>
                         </div>
                         """,
                         unsafe_allow_html=True,
                     )
+
+                    if guard_issues:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        for issue in guard_issues:
+                            st.warning(issue)
 
                 with res_tab2:
-                    st.markdown("#### Riscos Identificados no Documento")
-                    st.markdown("🔴 **Alto — Cláusula 8**<br><span style='color:#6c7890; font-size:0.85rem;'>Ausência de mecanismo claro de rescisão antecipada por descumprimento de prazos.</span>", unsafe_allow_html=True)
-                    st.markdown("🟡 **Médio — Cláusula 12**<br><span style='color:#6c7890; font-size:0.85rem;'>Prazo contratual de resposta apresenta divergência entre dias úteis e corridos.</span>", unsafe_allow_html=True)
+                    st.markdown("#### Riscos Identificados")
+                    risk_result = result.get("risk") or {}
+                    risk_answer = risk_result.get("answer")
+                    if risk_answer:
+                        st.markdown(risk_answer)
+                    else:
+                        st.info(
+                            "Nenhuma análise de risco dedicada foi executada para esta "
+                            "pergunta. Selecione o Agente de Risco ou peça explicitamente "
+                            "uma análise de riscos para acionar esse agente."
+                        )
 
                 with res_tab3:
-                    st.markdown("#### Evidências Encontradas na Base")
-                    st.markdown(
-                        """
-                        <div style="border: 1px solid #e0e6ed; padding: 12px; border-radius: 8px; background: #fafbfc;">
-                            <b>[1] Documento Analisado.pdf</b> &middot; Relevância: <b>96%</b>
-                            <br><br>
-                            <blockquote style="margin: 0; color: #555; font-style: italic; border-left: 3px solid #1769e0; padding-left: 8px;">
-                                "As partes elegem o foro central para dirimir quaisquer dúvidas oriundas deste instrumento..."
-                            </blockquote>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                    st.markdown("#### Evidências Recuperadas")
+                    if not real_citations:
+                        st.info("Nenhuma evidência foi recuperada da base para esta resposta.")
+                    else:
+                        for citation in real_citations:
+                            if not isinstance(citation, dict):
+                                continue
+                            doc = citation.get("document", "Documento")
+                            page = citation.get("page", "N/D")
+                            content = citation.get("content", "")
+                            score = citation.get("reranker_score")
+                            score_text = f"{score:.2f}" if isinstance(score, (int, float)) else "N/D"
+                            st.markdown(
+                                f"""
+                                <div style="border: 1px solid #e0e6ed; padding: 12px; border-radius: 8px; background: #fafbfc; margin-bottom: 8px;">
+                                    <b>[{citation.get('id', '?')}] {doc}</b> &middot; Página: {page} &middot; Score rerank: <b>{score_text}</b>
+                                    <br><br>
+                                    <blockquote style="margin: 0; color: #555; font-style: italic; border-left: 3px solid #1769e0; padding-left: 8px;">
+                                        {content}
+                                    </blockquote>
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
 
                 with res_tab4:
-                    st.markdown("- **[1] Base RAG Interna** (Relevância 96%)\n- **[2] Jurisprudência Aplicada** (Relevância 91% సాహిత్య)")
+                    render_citations(real_citations)
 
             st.session_state.messages.append({
                 "role": "assistant",

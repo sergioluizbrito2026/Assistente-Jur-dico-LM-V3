@@ -18,8 +18,16 @@ import streamlit as st
 from db import init_db, seed_demo
 
 from services.audit import audit
-from services.cases import create_case, list_cases
-from services.documents import list_documents
+from services.cases import (
+    create_case,
+    list_cases,
+    get_case,
+    update_case_status,
+    search_cases,
+    CASE_STATUSES,
+    CASE_PRIORITIES,
+)
+from services.documents import list_documents, document_status, delete_document
 from services.evaluation import evaluate_answer
 from services.rag_pipeline import rag_answer, retrieve_and_rerank
 from services.ai_orchestrator import orchestrate, risk_analysis
@@ -1130,18 +1138,39 @@ elif page == "Assistente IA":
 # ============================================================
 
 elif page == "Documentos":
-    
+
+    # CORREÇÃO (item 2.9): toda esta página era decorativa — o upload
+    # nunca chamava ingest_document(), a biblioteca mostrava dois
+    # documentos fixos ("Petição_Inicial.txt", "Contrato_..."), e os
+    # KPIs eram números fixos. Agora tudo vem de services.documents
+    # (dado real do SQLite) e o upload chama services.ingestion de
+    # verdade (extração → chunking → embeddings → FAISS).
+
+    org_id = user.get("organization_id")
+    documents = list_documents(org_id) if org_id else []
+    doc_status = document_status(org_id) if org_id else {"documents": 0, "chunks": 0}
+
+    total_docs = doc_status.get("documents", len(documents))
+    total_chunks = doc_status.get("chunks", 0)
+    total_pages = sum(int(d.get("pages") or 0) for d in documents)
+    ready_docs = sum(1 for d in documents if str(d.get("status", "")).lower() == "indexado")
+
     # 1️⃣ Cabeçalho e Indicador Superior do RAG
     head_col1, head_col2 = st.columns([3, 1])
     with head_col1:
         st.title("📄 Documentos")
         st.caption("Centralize contratos, petições, procurações e demais documentos jurídicos do seu escritório.")
     with head_col2:
+        status_ok = total_docs > 0
+        badge_bg = "#f0fdf4" if status_ok else "#fffbeb"
+        badge_border = "#bbf7d0" if status_ok else "#fde68a"
+        badge_color = "#15803d" if status_ok else "#92400e"
+        badge_text = "🟢 Base jurídica operacional" if status_ok else "🟡 Nenhum documento indexado ainda"
         st.markdown(
-            """
-            <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 10px; border-radius: 8px; text-align: right;">
-                <span style="font-size: 0.8rem; color: #15803d; font-weight: 600;">🟢 Base jurídica operacional</span><br>
-                <span style="font-size: 0.75rem; color: #4b5563;">2 documentos • 4 chunks indexados</span>
+            f"""
+            <div style="background: {badge_bg}; border: 1px solid {badge_border}; padding: 10px; border-radius: 8px; text-align: right;">
+                <span style="font-size: 0.8rem; color: {badge_color}; font-weight: 600;">{badge_text}</span><br>
+                <span style="font-size: 0.75rem; color: #4b5563;">{total_docs} documento(s) • {total_chunks} chunks indexados</span>
             </div>
             """,
             unsafe_allow_html=True
@@ -1149,121 +1178,185 @@ elif page == "Documentos":
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2️⃣ KPIs da Base de Documentos
+    # 2️⃣ KPIs da Base de Documentos (dado real)
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     with kpi1:
         with st.container(border=True):
-            st.markdown("📄 **2**")
+            st.markdown(f"📄 **{total_docs}**")
             st.caption("Documentos")
     with kpi2:
         with st.container(border=True):
-            st.markdown("📚 **4**")
+            st.markdown(f"📚 **{total_pages}**")
             st.caption("Páginas Totais")
     with kpi3:
         with st.container(border=True):
-            st.markdown("🧩 **4**")
+            st.markdown(f"🧩 **{total_chunks}**")
             st.caption("Chunks Indexados")
     with kpi4:
         with st.container(border=True):
-            st.markdown("🟢 **2**")
+            st.markdown(f"🟢 **{ready_docs}**")
             st.caption("Prontos para RAG")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Divisão em duas colunas: Esquerda (Upload + Biblioteca) | Direita (Base de Conhecimento IA & Pipeline)
     col_main, col_side = st.columns([2, 1])
 
     with col_main:
-        # 3️⃣ Área de Upload Limpa e Integrada
+        # 3️⃣ Área de Upload — agora chama ingest_document() de verdade
         with st.container(border=True):
             st.markdown("📤 **Adicionar novos documentos**")
             st.caption("Arraste e solte seus arquivos abaixo ou clique para selecionar.")
-            
-            # Usamos o file_uploader limpo do Streamlit sem duplicar caixas visuais
+
             uploaded_file = st.file_uploader(
-                "Carregar arquivos (PDF, DOCX, TXT)", 
-                type=["pdf", "docx", "txt"], 
-                label_visibility="collapsed"
+                "Carregar arquivos (PDF, DOCX, TXT)",
+                type=["pdf", "docx", "txt"],
+                label_visibility="collapsed",
             )
-            
-            use_ocr = st.checkbox("☑ Usar OCR quando necessário (para documentos digitalizados / escaneados)", value=True)
-            
+
+            use_ocr = st.checkbox(
+                "☑ Usar OCR quando necessário (para documentos digitalizados / escaneados)",
+                value=True,
+            )
+
             if uploaded_file:
                 st.markdown("<br>", unsafe_allow_html=True)
-                st.success(f"Arquivo `{uploaded_file.name}` carregado com sucesso!")
-                
-                # Simulação visual profissional do pipeline RAG exigida
-                with st.status("Processando documento na pipeline de IA...", expanded=True) as status:
-                    st.write("✓ Documento recebido com segurança")
-                    st.write("✓ Extração de texto concluída")
-                    st.write("✓ Chunking inteligente aplicado (4 blocos)")
-                    st.write("✓ Geração de Embeddings vetoriais")
-                    st.write("✓ Índice vetorial atualizado na base")
-                    status.update(label="🟢 Documento pronto para consulta via RAG!", state="complete", expanded=False)
+
+                # Evita reprocessar o mesmo arquivo a cada rerun do Streamlit
+                # (o widget mantém o arquivo "presente" até ser removido).
+                already_processed_key = f"doc_processed::{uploaded_file.name}::{uploaded_file.size}"
+
+                if st.session_state.get(already_processed_key):
+                    st.info(f"`{uploaded_file.name}` já foi processado nesta sessão.")
+                elif st.button("📤 Processar e indexar documento", type="primary"):
+                    with st.status("Processando documento na pipeline de IA...", expanded=True) as status:
+                        try:
+                            st.write("⏳ Extraindo texto, dividindo em chunks e gerando embeddings...")
+                            result = ingest_document(
+                                uploaded_file,
+                                org_id,
+                                use_ocr=use_ocr,
+                            )
+                            st.write(f"✓ {result.get('chunks', 0)} chunk(s) gerados a partir de {result.get('pages', 0)} página(s)")
+                            if result.get("ocr_pages"):
+                                st.write(f"✓ OCR aplicado em {result['ocr_pages']} página(s)")
+                            st.write(f"✓ {result.get('indexed_chunks', 0)} chunk(s) indexados no FAISS")
+                            status.update(
+                                label="🟢 Documento pronto para consulta via RAG!",
+                                state="complete",
+                                expanded=False,
+                            )
+                            st.session_state[already_processed_key] = True
+                            audit(
+                                action="document_upload",
+                                details={"filename": uploaded_file.name, "result": result},
+                                organization_id=org_id,
+                            )
+                            st.rerun()
+                        except ValueError as exc:
+                            status.update(label="🟡 Não foi possível processar", state="error", expanded=True)
+                            st.warning(str(exc))
+                        except Exception as exc:
+                            status.update(label="🔴 Falha na indexação", state="error", expanded=True)
+                            st.error(f"Erro ao processar o documento: {exc}")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # 4️⃣ Biblioteca de Documentos (Cards Modernos + Busca + Filtros)
+        # 4️⃣ Biblioteca de Documentos — agora lista dado real
         st.markdown("### 📚 Biblioteca de documentos")
-        
+
         filter_col1, filter_col2, filter_col3 = st.columns([2, 1, 1])
         with filter_col1:
             search_doc = st.text_input("Buscar documento...", placeholder="Digite o nome do arquivo...", label_visibility="collapsed")
         with filter_col2:
             type_filter = st.selectbox("Tipo", ["Todos os tipos", "PDF", "TXT", "DOCX"], label_visibility="collapsed")
         with filter_col3:
-            status_filter = st.selectbox("Status", ["Todos", "Indexados", "Processando"], label_visibility="collapsed")
+            status_filter = st.selectbox("Status", ["Todos", "Indexado", "Processando", "Erro na indexação"], label_visibility="collapsed")
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Card Documento 1
-        with st.container(border=True):
-            d_col1, d_col2 = st.columns([3, 1])
-            with d_col1:
-                st.markdown("📄 **Petição_Inicial.txt**")
-                st.caption("TXT • 1 página • 1 chunk • Atualizado hoje")
-                st.markdown("<span class='badge-green'>🟢 Indexado</span>", unsafe_allow_html=True)
-            with d_col2:
-                if st.button("Abrir", key="open_doc1", use_container_width=True):
-                    st.info("Abrindo visualizador do documento...")
-                if st.button("Analisar com IA", key="analyze_doc1", type="primary", use_container_width=True):
-                    st.session_state.page = "Assistente IA"
-                    st.session_state.pending_question = "Faça uma análise detalhada da Petição Inicial.txt"
-                    st.rerun()
+        visible_documents = documents
 
-        # Card Documento 2
-        with st.container(border=True):
-            d_col3, d_col4 = st.columns([3, 1])
-            with d_col3:
-                st.markdown("📕 **Contrato_Prestacao_Servicos.pdf**")
-                st.caption("PDF • 3 páginas • 3 chunks • Atualizado hoje")
-                st.markdown("<span class='badge-green'>🟢 Indexado</span>", unsafe_allow_html=True)
-            with d_col4:
-                if st.button("Abrir", key="open_doc2", use_container_width=True):
-                    st.info("Abrindo visualizador do documento...")
-                if st.button("Analisar com IA", key="analyze_doc2", type="primary", use_container_width=True):
-                    st.session_state.page = "Assistente IA"
-                    st.session_state.pending_question = "Faça uma análise crítica do Contrato_Prestacao_Servicos.pdf, identifique riscos e prazos."
-                    st.rerun()
+        if search_doc:
+            visible_documents = [
+                d for d in visible_documents
+                if search_doc.lower() in str(d.get("name", "")).lower()
+            ]
+
+        if type_filter != "Todos os tipos":
+            visible_documents = [
+                d for d in visible_documents
+                if str(d.get("type", "")).upper() == type_filter.upper()
+            ]
+
+        if status_filter != "Todos":
+            visible_documents = [
+                d for d in visible_documents
+                if str(d.get("status", "")) == status_filter
+            ]
+
+        if not visible_documents:
+            st.info(
+                "Nenhum documento encontrado. Envie um arquivo acima para começar."
+                if not documents
+                else "Nenhum documento corresponde aos filtros selecionados."
+            )
+
+        for doc in visible_documents:
+            doc_id = doc.get("id")
+            doc_name = doc.get("name", "Documento")
+            doc_type = str(doc.get("type", "")).upper()
+            doc_pages = doc.get("pages", 0)
+            doc_chunks = doc.get("chunks", 0)
+            doc_status_label = doc.get("status", "Desconhecido")
+
+            icon = "📕" if doc_type == "PDF" else ("📘" if doc_type == "DOCX" else "📄")
+
+            if doc_status_label == "Indexado":
+                badge_class, badge_icon = "badge-green", "🟢"
+            elif doc_status_label == "Processando":
+                badge_class, badge_icon = "badge-orange", "🟡"
+            else:
+                badge_class, badge_icon = "badge-red", "🔴"
+
+            with st.container(border=True):
+                d_col1, d_col2 = st.columns([3, 1])
+                with d_col1:
+                    st.markdown(f"{icon} **{doc_name}**")
+                    st.caption(f"{doc_type} • {doc_pages} página(s) • {doc_chunks} chunk(s)")
+                    st.markdown(f"<span class='{badge_class}'>{badge_icon} {doc_status_label}</span>", unsafe_allow_html=True)
+                with d_col2:
+                    if st.button("Analisar com IA", key=f"analyze_doc_{doc_id}", type="primary", use_container_width=True):
+                        st.session_state.page = "Assistente IA"
+                        st.session_state.pending_question = f"Faça uma análise detalhada de {doc_name}."
+                        st.rerun()
+                    if st.button("🗑️ Excluir", key=f"delete_doc_{doc_id}", use_container_width=True):
+                        if delete_document(doc_id, org_id):
+                            audit(
+                                action="document_delete",
+                                details={"document_id": doc_id, "filename": doc_name},
+                                organization_id=org_id,
+                                entity_type="document",
+                                entity_id=doc_id,
+                            )
+                            st.rerun()
 
     with col_side:
-        # 5️⃣ Base de Conhecimento da IA (Painel RAG Dedicado)
+        # 5️⃣ Base de Conhecimento da IA — dado real
         with st.container(border=True):
             st.markdown("🧠 **Base de Conhecimento**")
-            st.caption("2 documentos disponíveis para o motor RAG.")
-            
+            st.caption(f"{total_docs} documento(s) disponível(is) para o motor RAG.")
+
             st.markdown("---")
-            
+
+            last_update = "N/D"
+            if documents:
+                last_update = documents[0].get("created_at", "N/D")
+
             st.markdown("**Métricas do Vector Store**")
-            st.markdown("Chunks indexados: `4`")
-            st.markdown("Documentos processados: `2`")
-            st.markdown("Última atualização: `Hoje`")
-            st.markdown("Status do Motor: `🟢 Operacional`")
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            if st.button("Ver base de conhecimento", use_container_width=True):
-                st.success("O motor RAG está ativo indexando os metadados e vetores em tempo real.")
+            st.markdown(f"Chunks indexados: `{total_chunks}`")
+            st.markdown(f"Documentos processados: `{total_docs}`")
+            st.markdown(f"Última atualização: `{last_update}`")
+            st.markdown(f"Status do Motor: `{'🟢 Operacional' if total_chunks > 0 else '🟡 Aguardando documentos'}`")
 
         # Painel Informativo Lateral: Conexão Documento → Assistente IA
         with st.container(border=True):
@@ -1298,182 +1391,201 @@ elif page == "Documentos":
 # ============================================================
 
 elif page == "Processos":
-    
-    # Verifica se o usuário clicou para abrir um processo específico
+
+    # CORREÇÃO (item 2.4): esta página inteira era decorativa — os três
+    # processos (#2026-0145, #2026-0182, #2026-0191), riscos, prazos e
+    # histórico eram HTML estático, mesmo com services.cases pronto e
+    # importado (create_case/list_cases nunca eram chamados). Agora usa
+    # dado real do banco. A tabela `cases` (db.py) só guarda title,
+    # client, category, priority, status e created_at — não guarda
+    # risco, prazo, documentos vinculados nem histórico de análises.
+    # Por isso essas seções foram removidas em vez de mantidas com
+    # dado fabricado (mesmo princípio do item 2.1): melhor não mostrar
+    # a informação do que mostrar uma inventada.
+
+    org_id = user.get("organization_id")
+
     selected_process_id = st.session_state.get("active_process_id", None)
 
     if selected_process_id:
         # ========================================================
-        # VISÃO DETALHADA DO PROCESSO SELECIONADO
+        # VISÃO DETALHADA DO PROCESSO SELECIONADO (dado real)
         # ========================================================
-        
+
+        case = get_case(org_id, selected_process_id) if org_id else None
+
         col_back, col_actions = st.columns([4, 1])
         with col_back:
             if st.button("← Voltar para a lista de processos"):
                 st.session_state.pop("active_process_id", None)
                 st.rerun()
         with col_actions:
-            if st.button("⚡ Analisar com IA", type="primary", use_container_width=True):
+            if case and st.button("⚡ Analisar com IA", type="primary", use_container_width=True):
                 st.session_state.page = "Assistente IA"
-                st.session_state.pending_question = f"Faça uma análise completa e detalhada do {selected_process_id}, cruzando riscos, prazos e documentos."
+                st.session_state.pending_question = (
+                    f"Faça uma análise sobre o processo '{case.get('title')}' "
+                    f"do cliente {case.get('client')}."
+                )
                 st.rerun()
 
-        st.markdown(f"## ⚖️ PROCESSO {selected_process_id}")
-        st.caption("Cliente: **Cliente A** &middot; Área: **Trabalhista** &middot; Status: **Em andamento**")
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # KPIs Rápidos do Processo
-        pk1, pk2, pk3, pk4 = st.columns(4)
-        with pk1:
-            with st.container(border=True):
-                st.markdown("🔴 **Risco: Alto**")
-        with pk2:
-            with st.container(border=True):
-                st.markdown("⏰ **Próximo prazo: 2 dias**")
-        with pk3:
-            with st.container(border=True):
-                st.markdown("📄 **Documentos: 8**")
-        with pk4:
-            with st.container(border=True):
-                st.markdown("🤖 **Análises IA: 14**")
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # Abas internas do processo detalhado
-        p_tab1, p_tab2, p_tab3, p_tab4, p_tab5, p_tab6, p_tab7 = st.tabs([
-            "📋 Resumo", "📄 Documentos", "🤖 Análises IA", "⚠️ Riscos", "⏰ Prazos", "📌 Evidências", "📜 Histórico"
-        ])
-
-        with p_tab1:
-            st.markdown("#### Resumo Executivo do Caso")
-            st.markdown(
-                """
-                O presente processo envolve reclamação trabalhista complexa movida em face da empresa, 
-                alegando divergências em verbas rescisórias e horas extras. A base de conhecimento RAG 
-                indexou 8 documentos essenciais para a defesa.
-                """,
-                unsafe_allow_html=True
+        if not case:
+            st.warning("Processo não encontrado.")
+        else:
+            st.markdown(f"## ⚖️ {case.get('title', 'Processo')}")
+            st.caption(
+                f"Cliente: **{case.get('client', 'N/D')}** &middot; "
+                f"Categoria: **{case.get('category', 'N/D')}** &middot; "
+                f"Status: **{case.get('status', 'N/D')}**"
             )
+
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("📝 Solicitar resumo atualizado à IA", key="sum_proc_ia"):
-                st.session_state.page = "Assistente IA"
-                st.session_state.pending_question = f"Gere um resumo executivo atualizado para o {selected_process_id}."
-                st.rerun()
 
-        with p_tab2:
-            st.markdown("#### Documentos Vinculados (8)")
-            st.markdown("- **Petição Inicial.pdf** (Página 1 a 12) — `Indexado no RAG`")
-            st.markdown("- **Contrato de Trabalho.pdf** (Página 1 a 4) — `Indexado no RAG`")
-            st.markdown("- **Cartões de Ponto (Lote 1).pdf** (Página 1 a 35) — `Indexado no RAG`")
+            pk1, pk2, pk3 = st.columns(3)
+            priority = case.get("priority", "N/D")
+            priority_badge = {
+                "Crítica": "🔴", "Alta": "🟠", "Média": "🟡", "Baixa": "🟢",
+            }.get(priority, "⚪")
+            with pk1:
+                with st.container(border=True):
+                    st.markdown(f"{priority_badge} **Prioridade: {priority}**")
+            with pk2:
+                with st.container(border=True):
+                    st.markdown(f"📌 **Status: {case.get('status', 'N/D')}**")
+            with pk3:
+                with st.container(border=True):
+                    st.markdown(f"📅 **Aberto em: {case.get('created_at', 'N/D')}**")
+
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("📤 Adicionar novo documento ao processo", key="add_doc_proc"):
-                st.session_state.page = "Documentos"
-                st.rerun()
 
-        with p_tab3:
-            st.markdown("#### Histórico de Análises Realizadas pela IA (14)")
-            st.markdown("1. **Auditoria de Horas Extras** — Executada em 04/09/2026 (Agente de Risco)")
-            st.markdown("2. **Validação de Verbas Rescisórias** — Executada em 02/09/2026 (Agente Jurídico)")
-            st.markdown("3. **Análise Preliminar da Petição** — Executada em 30/08/2026 (Agente Geral)")
+            st.markdown("#### Atualizar status")
+            new_status = st.selectbox(
+                "Status do processo",
+                CASE_STATUSES,
+                index=CASE_STATUSES.index(case.get("status")) if case.get("status") in CASE_STATUSES else 0,
+                label_visibility="collapsed",
+            )
+            if st.button("Salvar status"):
+                update_result = update_case_status(org_id, selected_process_id, new_status)
+                if update_result.get("updated"):
+                    audit(
+                        action="case_status_update",
+                        details={"case_id": selected_process_id, "new_status": new_status},
+                        organization_id=org_id,
+                        entity_type="case",
+                        entity_id=selected_process_id,
+                    )
+                    st.success("Status atualizado.")
+                    st.rerun()
 
-        with p_tab4:
-            st.markdown("#### Riscos Identificados")
-            st.markdown("🔴 **Risco Alto:** Ausência de registro eletrônico de ponto em 3 cartões de frequência.")
-            st.markdown("🟡 **Risco Médio:** Divergência de interpretação sobre o banco de horas acumulado.")
-
-        with p_tab5:
-            st.markdown("#### Prazos Processuais Pendentes")
-            st.markdown("⏰ **Prazo crítico:** Contestação vence em **2 dias** (07/09/2026).")
-            st.markdown("⏰ **Prazo futuro:** Audiência de conciliação marcada para daqui a 15 dias.")
-
-        with p_tab6:
-            st.markdown("#### Evidências Recuperadas via RAG")
-            st.markdown("> *“O controle de jornada anexado apresenta lacunas nos dias 12 a 15 do mês de fevereiro...”* (Fonte: Cartões de Ponto, p. 8)")
-
-        with p_tab7:
-            st.markdown("#### Histórico de Atividades")
-            pages_history = [
-                ("05/09/2026 14:30", "Dr. Sérgio Luiz consultou os riscos do processo."),
-                ("04/09/2026 10:15", "Sistema RAG indexou novos documentos."),
-                ("30/08/2026 09:00", "Processo #2026-0145 cadastrado na base.")
-            ]
-            for data_h, desc_h in pages_history:
-                st.markdown(f"- **{data_h}** — {desc_h}")
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.info(
+                "Vínculo com documentos, riscos e prazos por processo ainda não "
+                "está implementado no schema atual — só os campos acima existem "
+                "de fato no banco. Use o botão 'Analisar com IA' para consultar "
+                "a base de documentos com contexto deste processo."
+            )
 
     else:
         # ========================================================
-        # LISTAGEM GERAL DE PROCESSOS
+        # LISTAGEM GERAL DE PROCESSOS (dado real)
         # ========================================================
-        
+
         st.title("⚖️ Gestão de Processos")
-        st.caption("Central de contexto integrando documentos, RAG, riscos e prazos.")
-        
+        st.caption("Central de casos jurídicos do escritório.")
+
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Barra de Pesquisa e Filtros
+        with st.expander("➕ Novo processo"):
+            with st.form("new_case_form", clear_on_submit=True):
+                nc_title = st.text_input("Título do processo")
+                nc_client = st.text_input("Cliente")
+                nc_category = st.text_input("Categoria (ex.: Trabalhista, Societário, Contratual)")
+                nc_priority = st.selectbox("Prioridade", CASE_PRIORITIES)
+                nc_submitted = st.form_submit_button("Criar processo", type="primary")
+
+                if nc_submitted:
+                    try:
+                        created = create_case(org_id, nc_title, nc_client, nc_category, nc_priority)
+                        audit(
+                            action="case_create",
+                            details={"case_id": created.get("case_id"), "title": nc_title},
+                            organization_id=org_id,
+                            entity_type="case",
+                            entity_id=created.get("case_id"),
+                        )
+                        st.success(f"Processo '{nc_title}' criado.")
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+
         f_col1, f_col2 = st.columns([3, 2])
         with f_col1:
-            search_query = st.text_input("Buscar processo...", placeholder="Digite o número do processo, cliente ou matéria...", label_visibility="collapsed")
+            search_query = st.text_input(
+                "Buscar processo...",
+                placeholder="Digite o título, cliente ou categoria...",
+                label_visibility="collapsed",
+            )
         with f_col2:
             status_filter = st.selectbox(
                 "Filtro de status",
-                ["Todos", "Ativos", "Em análise", "Concluídos"],
-                label_visibility="collapsed"
+                ["Todos"] + CASE_STATUSES,
+                label_visibility="collapsed",
             )
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Card do Processo Principal (#2026-0145)
-        with st.container(border=True):
-            pc_col1, pc_col2 = st.columns([3, 1])
-            with pc_col1:
-                st.markdown("### Processo #2026-0145")
-                st.markdown("Cliente: **Cliente A** &middot; Área: **Trabalhista**")
-                st.markdown("Status: **Em andamento** &middot; Risco: <span class='badge-red'>🔴 Alto</span> &middot; Próximo prazo: **2 dias**", unsafe_allow_html=True)
-                st.markdown("<span style='font-size: 0.8rem; color: #64748b;'>📄 8 documentos vinculados &nbsp;|&nbsp; 🤖 14 análises de IA realizadas</span>", unsafe_allow_html=True)
-            with pc_col2:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("Ver processo", key="btn_open_145", use_container_width=True):
-                    st.session_state.active_process_id = "Processo #2026-0145"
-                    st.rerun()
-                if st.button("Analisar com IA", key="btn_ai_145", type="primary", use_container_width=True):
-                    st.session_state.page = "Assistente IA"
-                    st.session_state.pending_question = "Faça uma análise completa do Processo #2026-0145."
-                    st.rerun()
+        if org_id:
+            cases = search_cases(org_id, search_query) if search_query else list_cases(org_id)
+        else:
+            cases = []
 
-        # Card do Processo Secundário (#2026-0182)
-        with st.container(border=True):
-            pc_col3, pc_col4 = st.columns([3, 1])
-            with pc_col3:
-                st.markdown("### Processo #2026-0182")
-                st.markdown("Cliente: **Beta Participações** &middot; Área: **Societário**")
-                st.markdown("Status: **Em andamento** &middot; Risco: <span class='badge-orange'>🟠 Médio</span> &middot; Próximo prazo: **5 dias**", unsafe_allow_html=True)
-                st.markdown("<span style='font-size: 0.8rem; color: #64748b;'>📄 4 documentos vinculados &nbsp;|&nbsp; 🤖 6 análises de IA realizadas</span>", unsafe_allow_html=True)
-            with pc_col4:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("Ver processo", key="btn_open_182", use_container_width=True):
-                    st.session_state.active_process_id = "Processo #2026-0182"
-                    st.rerun()
-                if st.button("Analisar com IA", key="btn_ai_182", type="primary", use_container_width=True):
-                    st.session_state.page = "Assistente IA"
-                    st.session_state.pending_question = "Faça uma análise completa do Processo #2026-0182."
-                    st.rerun()
+        if status_filter != "Todos":
+            cases = [c for c in cases if c.get("status") == status_filter]
 
-        # Card do Processo (#2026-0191)
-        with st.container(border=True):
-            pc_col5, pc_col6 = st.columns([3, 1])
-            with pc_col5:
-                st.markdown("### Processo #2026-0191")
-                st.markdown("Cliente: **Gamma Comércio** &middot; Área: **Contratual**")
-                st.markdown("Status: **Em análise** &middot; Risco: <span class='badge-green'>🟢 Baixo</span> &middot; Próximo prazo: **12 dias**", unsafe_allow_html=True)
-                st.markdown("<span style='font-size: 0.8rem; color: #64748b;'>📄 2 documentos vinculados &nbsp;|&nbsp; 🤖 3 análises de IA realizadas</span>", unsafe_allow_html=True)
-            with pc_col6:
-                st.markdown("<br>", unsafe_allow_html=True)
-                if st.button("Ver processo", key="btn_open_191", use_container_width=True):
-                    st.session_state.active_process_id = "Processo #2026-0191"
-                    st.rerun()
-                if st.button("Analisar com IA", key="btn_ai_191", type="primary", use_container_width=True):
-                    st.session_state.page = "Assistente IA"
-                    st.session_state.pending_question = "Faça uma análise completa do Processo #2026-0191."
-                    st.rerun()
+        if not cases:
+            st.info(
+                "Nenhum processo cadastrado ainda. Use '➕ Novo processo' acima para começar."
+                if not search_query
+                else "Nenhum processo encontrado para essa busca."
+            )
+
+        priority_badges = {
+            "Crítica": ("badge-red", "🔴"),
+            "Alta": ("badge-orange", "🟠"),
+            "Média": ("badge-orange", "🟡"),
+            "Baixa": ("badge-green", "🟢"),
+        }
+
+        for case in cases:
+            case_id = case.get("id")
+            badge_class, badge_icon = priority_badges.get(case.get("priority"), ("badge-green", "⚪"))
+
+            with st.container(border=True):
+                pc_col1, pc_col2 = st.columns([3, 1])
+                with pc_col1:
+                    st.markdown(f"### {case.get('title', 'Processo')}")
+                    st.markdown(
+                        f"Cliente: **{case.get('client', 'N/D')}** &middot; "
+                        f"Categoria: **{case.get('category', 'N/D')}**"
+                    )
+                    st.markdown(
+                        f"Status: **{case.get('status', 'N/D')}** &middot; "
+                        f"Prioridade: <span class='{badge_class}'>{badge_icon} {case.get('priority', 'N/D')}</span>",
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f"<span style='font-size: 0.8rem; color: #64748b;'>Aberto em {case.get('created_at', 'N/D')}</span>",
+                        unsafe_allow_html=True,
+                    )
+                with pc_col2:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    if st.button("Ver processo", key=f"btn_open_{case_id}", use_container_width=True):
+                        st.session_state.active_process_id = case_id
+                        st.rerun()
+                    if st.button("Analisar com IA", key=f"btn_ai_{case_id}", type="primary", use_container_width=True):
+                        st.session_state.page = "Assistente IA"
+                        st.session_state.pending_question = (
+                            f"Faça uma análise sobre o processo '{case.get('title')}' "
+                            f"do cliente {case.get('client')}."
+                        )
+                        st.rerun()

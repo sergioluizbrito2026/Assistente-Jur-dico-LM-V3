@@ -994,54 +994,15 @@ def build_report_pdf(summary, cases_df, doc_count, risks_count, deadlines):
     return buffer.getvalue()
 
 
-def _chart_layout(fig, height=280, showlegend=False):
-    """Tema visual único para todos os gráficos do Legal Tech."""
-    fig.update_layout(
-        height=height,
-        margin=dict(l=8, r=8, t=12, b=8),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="Inter, Segoe UI, sans-serif", color="#b9cbe3", size=11),
-        showlegend=showlegend,
-        hoverlabel=dict(
-            bgcolor="#071b3d",
-            bordercolor="#2b6fca",
-            font=dict(color="#f5f9ff", size=11),
-        ),
-        transition=dict(duration=450, easing="cubic-in-out"),
-        uirevision="legal-tech-v3",
-    )
-    return fig
-
-
 def report_status_chart(cases):
     df = report_cases_dataframe(cases)
-    if df.empty:
+    if df.empty or df["Status"].fillna("").eq("").all():
         labels, values = ["Sem dados"], [1]
     else:
         counts = df["Status"].fillna("Sem status").replace("", "Sem status").value_counts()
         labels, values = counts.index.tolist(), counts.values.tolist()
-
-    palette = ["#1685ff", "#7c3aed", "#f59e0b", "#10b981", "#ec4899", "#647da2"]
-    fig = go.Figure(go.Pie(
-        labels=labels,
-        values=values,
-        hole=.70,
-        sort=False,
-        textinfo="none",
-        marker=dict(colors=palette[:len(labels)], line=dict(color="#06142e", width=3)),
-        hovertemplate="<b>%{label}</b><br>%{value} processo(s)<br>%{percent}<extra></extra>",
-    ))
-    total = sum(values)
-    _chart_layout(fig, 285, True)
-    fig.update_layout(
-        legend=dict(orientation="v", x=1.02, y=.5, xanchor="left", font=dict(color="#a9c0df", size=10)),
-        annotations=[dict(
-            text=f"<b>{total}</b><br><span style='font-size:10px'>Processos</span>",
-            x=.5, y=.5, showarrow=False,
-            font=dict(color="#ffffff", size=22),
-        )],
-    )
+    fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.68, textinfo="none", marker=dict(line=dict(color="#071a37", width=2)))])
+    fig.update_layout(height=260, margin=dict(l=0,r=0,t=10,b=0), paper_bgcolor="rgba(0,0,0,0)", showlegend=True, legend=dict(font=dict(color="#b9cbe3", size=10)))
     return fig
 
 
@@ -1052,96 +1013,66 @@ def report_category_chart(cases):
     else:
         counts = df["Categoria"].fillna("Não informada").replace("", "Não informada").value_counts().head(8)
         labels, values = counts.index.tolist(), counts.values.tolist()
-
-    palette = ["#1685ff", "#7c3aed", "#06b6d4", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#647da2"]
-    fig = go.Figure(go.Bar(
-        x=values,
-        y=labels,
-        orientation="h",
-        text=values,
-        textposition="outside",
-        cliponaxis=False,
-        marker=dict(color=palette[:len(labels)], line=dict(width=0)),
-        hovertemplate="<b>%{y}</b><br>%{x} processo(s)<extra></extra>",
-    ))
-    _chart_layout(fig, 285, False)
-    fig.update_layout(
-        xaxis=dict(showgrid=True, gridcolor="rgba(89,139,203,.16)", zeroline=False, tickfont=dict(color="#7898be", size=9)),
-        yaxis=dict(showgrid=False, tickfont=dict(color="#c6d7ec", size=10), categoryorder="total ascending"),
-        bargap=.34,
-    )
+    fig = go.Figure(data=[go.Bar(x=values, y=labels, orientation="h")])
+    fig.update_layout(height=260, margin=dict(l=10,r=10,t=10,b=10), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#a9c0df", size=10), xaxis=dict(showgrid=True, gridcolor="rgba(47,88,140,.25)"), yaxis=dict(showgrid=False))
     return fig
 
-
 def plot_dark_line(cases=None):
-    """Evolução moderna e dinâmica dos processos por data de criação."""
-    rows = []
-    for item in (cases or []):
-        raw = item.get("created_at", item.get("createdAt", item.get("created"))) if isinstance(item, dict) else None
-        dt = _to_date(raw)
-        if dt:
-            rows.append(dt)
-
-    if rows:
-        series = pd.Series(rows).value_counts().sort_index().tail(14)
-        x = [d.strftime("%d/%m") for d in series.index]
-        y = series.values.tolist()
+    """Gráfico moderno baseado nos casos reais da organização."""
+    cases = cases or []
+    df = report_cases_dataframe(cases) if cases else pd.DataFrame()
+    if not df.empty and "Criado em" in df.columns:
+        dates = pd.to_datetime(df["Criado em"], errors="coerce").dt.date.dropna()
+        if not dates.empty:
+            end_date = max(dates)
+            start_date = end_date - timedelta(days=6)
+            series = pd.Series(0, index=pd.date_range(start_date, end_date, freq="D"))
+            for d in dates:
+                if start_date <= d <= end_date:
+                    series[pd.Timestamp(d)] += 1
+            x = [d.strftime("%d/%m") for d in series.index]
+            y = series.astype(int).tolist()
+        else:
+            x, y = [], []
     else:
-        # Mantém o gráfico elegante mesmo antes do primeiro cadastro.
         x, y = [], []
-
+    if not x:
+        x = ["Sem dados"]
+        y = [0]
     fig = go.Figure()
-    if x:
-        fig.add_trace(go.Scatter(
-            x=x, y=y,
-            mode="lines+markers",
-            name="Processos",
-            line=dict(color="#4f8cff", width=3.5, shape="spline"),
-            marker=dict(color="#d7ecff", size=7, line=dict(color="#1685ff", width=2)),
-            fill="tozeroy",
-            fillcolor="rgba(37,99,235,.18)",
-            hovertemplate="<b>%{x}</b><br>%{y} processo(s)<extra></extra>",
-        ))
-    else:
-        fig.add_annotation(text="Sem dados suficientes para exibir a evolução", x=.5, y=.5, xref="paper", yref="paper", showarrow=False, font=dict(color="#7898be", size=12))
-
-    _chart_layout(fig, 270, False)
-    fig.update_layout(
-        xaxis=dict(showgrid=False, linecolor="#183e72", tickfont=dict(color="#7d9bc0", size=9)),
-        yaxis=dict(showgrid=True, gridcolor="rgba(89,139,203,.14)", zeroline=False, tickfont=dict(color="#7d9bc0", size=9), rangemode="tozero"),
-    )
+    fig.add_trace(go.Scatter(
+        x=x, y=y, mode="lines+markers",
+        line=dict(color="#4f8cff", width=3, shape="spline"),
+        marker=dict(color="#8ec5ff", size=7),
+        fill="tozeroy", fillcolor="rgba(37,99,235,.20)",
+        hovertemplate="%{x}: %{y} processo(s)<extra></extra>",
+    ))
+    fig.update_layout(height=235, margin=dict(l=8,r=8,t=10,b=5),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#91a8c8", size=10),
+        xaxis=dict(showgrid=False, linecolor="#183e72", tickfont=dict(color="#7d9bc0")),
+        yaxis=dict(showgrid=True, gridcolor="rgba(47,88,140,.25)", zeroline=False, tickfont=dict(color="#7d9bc0"), dtick=1),
+        showlegend=False)
     return fig
 
 
 def plot_status_donut(cases=None):
-    """Donut do dashboard baseado nos processos reais da organização."""
-    df = report_cases_dataframe(cases or [])
+    """Donut moderno usando exclusivamente os processos reais."""
+    cases = cases or []
+    df = report_cases_dataframe(cases) if cases else pd.DataFrame()
     if df.empty:
         labels, values = ["Sem dados"], [1]
+        total = 0
     else:
         counts = df["Status"].fillna("Sem status").replace("", "Sem status").value_counts()
         labels, values = counts.index.tolist(), counts.values.tolist()
-
-    palette = ["#1685ff", "#7c3aed", "#f59e0b", "#647da2", "#10b981", "#ec4899"]
-    fig = go.Figure(go.Pie(
-        labels=labels,
-        values=values,
-        hole=.70,
-        sort=False,
-        textinfo="none",
-        marker=dict(colors=palette[:len(labels)], line=dict(color="#06142e", width=3)),
-        hovertemplate="<b>%{label}</b><br>%{value} processo(s)<br>%{percent}<extra></extra>",
-    ))
-    total = sum(values) if labels != ["Sem dados"] else 0
-    _chart_layout(fig, 220, False)
-    fig.update_layout(
-        showlegend=False,
-        annotations=[dict(
-            text=f"<b>{total}</b><br><span style='font-size:10px'>Total</span>",
-            x=.5, y=.5, showarrow=False,
-            font=dict(color="#ffffff", size=21),
-        )],
-    )
+        total = int(sum(values))
+    fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.68, textinfo="none",
+        marker=dict(colors=["#1785ff","#7c3aed","#f59e0b","#647da2","#14b8a6","#ec4899"][:len(labels)],
+                    line=dict(color="#071a37", width=2)),
+        hovertemplate="%{label}: %{value} processo(s) · %{percent}<extra></extra>")])
+    fig.update_layout(height=220, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor="rgba(0,0,0,0)", showlegend=False,
+        annotations=[dict(text=f"<b>{total}</b><br><span style='font-size:10px'>Total</span>", x=.5,y=.5,showarrow=False,font=dict(color="#fff",size=21))])
     return fig
 
 
@@ -1225,6 +1156,7 @@ if "pending_question" not in st.session_state:
 
 page_options = [
     "Dashboard",
+    "Super Admin",
     "Assistente IA",
     "Documentos",
     "Processos",
@@ -1274,6 +1206,9 @@ with st.sidebar:
         ("Perfil", "👤"),
     ]
 
+    if str(user.get("role", "")).lower() in {"super admin", "superadmin", "administrador"}:
+        nav_items.insert(1, ("Super Admin", "👑"))
+
     page = st.session_state.page
     for nav_name, nav_icon in nav_items:
         active = "sidebar-active" if page == nav_name else ""
@@ -1306,8 +1241,8 @@ with st.sidebar:
             <div class="profile-row">
                 <div class="avatar">👤</div>
                 <div>
-                    <div class="profile-name">Dr. Sérgio Luiz</div>
-                    <div class="profile-role">Administrador</div>
+                    <div class="profile-name">{user.get("name", "Usuário Jurídico")}</div>
+                    <div class="profile-role">{user.get("role", "Usuário")}</div>
                 </div>
             </div>
             <div class="online">● Sistema Online</div>
@@ -1422,6 +1357,70 @@ if global_search and global_search.strip():
 
     st.markdown("</div>", unsafe_allow_html=True)
 
+
+
+# ============================================================
+# SUPER ADMIN
+# ============================================================
+
+if page == "Super Admin":
+    if str(user.get("role", "")).lower() not in {"super admin", "superadmin", "administrador"}:
+        st.error("Acesso restrito ao Super Admin.")
+        st.stop()
+
+    st.markdown('<div class="page-title">👑 Super Admin</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-subtitle">Visão global da plataforma, organizações e uso do SaaS.</div>', unsafe_allow_html=True)
+
+    with get_connection() as conn:
+        orgs = conn.execute("SELECT id,name,plan,created_at FROM organizations ORDER BY id DESC").fetchall()
+        users_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        docs_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        cases_count = conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0]
+        events_count = conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0]
+
+    k1,k2,k3,k4,k5=st.columns(5)
+    for col, icon, label, value, css in [
+        (k1,"🏢","Organizações",len(orgs),"kpi-blue"),
+        (k2,"👥","Usuários",users_count,"kpi-purple"),
+        (k3,"📄","Documentos",docs_count,"kpi-teal"),
+        (k4,"⚖️","Processos",cases_count,"kpi-blue"),
+        (k5,"🛡️","Eventos",events_count,"kpi-red"),
+    ]:
+        with col: metric_card(icon,label,value,"dados globais","plataforma",""+css)
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    section_header("🏢","Organizações","Clientes e ambientes cadastrados")
+    rows=[]
+    with get_connection() as conn:
+        for o in orgs:
+            oid=o[0]
+            rows.append({
+                "ID":oid,"Organização":o[1],"Plano":o[2] or "Profissional",
+                "Usuários":conn.execute("SELECT COUNT(*) FROM users WHERE organization_id=?",(oid,)).fetchone()[0],
+                "Documentos":conn.execute("SELECT COUNT(*) FROM documents WHERE organization_id=?",(oid,)).fetchone()[0],
+                "Processos":conn.execute("SELECT COUNT(*) FROM cases WHERE organization_id=?",(oid,)).fetchone()[0],
+                "Criada em":o[3]
+            })
+    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+    a,b=st.columns(2)
+    with a:
+        st.markdown('<div class="section-card">',unsafe_allow_html=True)
+        section_header("💳","Planos","Estrutura inicial de cobrança")
+        plan_df=pd.DataFrame(rows) if rows else pd.DataFrame(columns=["Organização","Plano"])
+        if not plan_df.empty:
+            st.bar_chart(plan_df["Plano"].value_counts())
+        else: st.info("Nenhuma organização cadastrada.")
+        st.markdown('</div>',unsafe_allow_html=True)
+    with b:
+        st.markdown('<div class="section-card">',unsafe_allow_html=True)
+        section_header("🔐","Governança","Isolamento por organização")
+        st.markdown("**Status:** 🟢 Estrutura multi-tenant ativa")
+        st.caption("Documentos, chunks, processos e auditoria possuem vínculo com organization_id. O próximo passo é aplicar o mesmo isolamento a todos os serviços e ao armazenamento vetorial antes de clientes externos.")
+        st.markdown('</div>',unsafe_allow_html=True)
 
 
 # ============================================================
@@ -2355,12 +2354,6 @@ elif page == "Relatórios":
     st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
 
     # -------------------- GRÁFICOS --------------------
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    section_header("📈", "Evolução da carteira", "Processos cadastrados ao longo do tempo")
-    st.plotly_chart(plot_dark_line(filtered_cases), use_container_width=True, config={"displayModeBar": False})
-    st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
-
     g1, g2 = st.columns([1.35, 1])
     with g1:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)

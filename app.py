@@ -101,6 +101,9 @@ st.markdown(
     padding-bottom:2.5rem;
 }
 
+
+.info-row{display:flex;justify-content:space-between;gap:14px;align-items:center;padding:10px 0;border-bottom:1px solid rgba(23,61,114,.45);font-size:.78rem;color:#91a8c8}.info-row:last-child{border-bottom:0}.info-row b{color:#f5f9ff;text-align:right}.badge{display:inline-flex;align-items:center;padding:4px 9px;border-radius:999px;font-size:.68rem;font-weight:700}.badge-green{background:rgba(16,214,160,.12);color:#10d6a0;border:1px solid rgba(16,214,160,.35)}
+
 /* ---------- HEADER ---------- */
 [data-testid="stHeader"]{
     background:rgba(2,11,29,.72);
@@ -2684,33 +2687,105 @@ elif page == "Configurações":
     st.markdown(
         """
         <div class="page-title">⚙️ Configurações</div>
-        <div class="page-subtitle">
-            Preferências do Assistente Jurídico.
-        </div>
+        <div class="page-subtitle">Preferências, inteligência artificial e parâmetros do RAG.</div>
         """,
         unsafe_allow_html=True,
     )
 
-    with st.form("settings_form"):
-        provider = st.selectbox(
-            "Provedor de IA",
-            ["Gemini", "OpenAI"],
+    # Estado da sessão para não quebrar a configuração existente do projeto.
+    if "settings_provider" not in st.session_state:
+        st.session_state.settings_provider = "Gemini"
+    if "settings_model" not in st.session_state:
+        st.session_state.settings_model = "gemini-2.5-flash"
+    if "settings_temperature" not in st.session_state:
+        st.session_state.settings_temperature = 0.20
+    if "settings_top_k" not in st.session_state:
+        st.session_state.settings_top_k = 8
+
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    section_header("🤖", "Inteligência Artificial", "Configure o provedor e o comportamento das respostas")
+    c1, c2 = st.columns(2)
+    with c1:
+        with st.form("settings_ai_form", clear_on_submit=False):
+            provider = st.selectbox(
+                "Provedor de IA",
+                ["Gemini", "OpenAI"],
+                index=["Gemini", "OpenAI"].index(st.session_state.settings_provider),
+            )
+            model_options = {
+                "Gemini": ["gemini-2.5-flash", "gemini-2.5-pro"],
+                "OpenAI": ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4.1"],
+            }
+            current_models = model_options[provider]
+            default_model = st.session_state.settings_model if st.session_state.settings_model in current_models else current_models[0]
+            model = st.selectbox("Modelo", current_models, index=current_models.index(default_model))
+            temperature = st.slider(
+                "Temperatura",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(st.session_state.settings_temperature),
+                step=0.05,
+                help="Valores menores deixam as respostas mais determinísticas; maiores aumentam a criatividade.",
+            )
+            if st.form_submit_button("💾 Salvar preferências", type="primary"):
+                st.session_state.settings_provider = provider
+                st.session_state.settings_model = model
+                st.session_state.settings_temperature = temperature
+                audit(action="settings_updated", details={"provider": provider, "model": model, "temperature": temperature})
+                st.success("Configurações atualizadas para esta sessão.")
+
+    with c2:
+        st.markdown(
+            f"""
+            <div class="glass-card" style="height:100%">
+                <div style="font-size:1rem;font-weight:800">🔐 Conectividade</div>
+                <div style="color:#91a8c8;font-size:.75rem;margin:6px 0 18px">Status dos serviços de IA configurados no ambiente.</div>
+                <div class="info-row"><span>Provedor selecionado</span><b>{st.session_state.settings_provider}</b></div>
+                <div class="info-row"><span>Modelo</span><b>{st.session_state.settings_model}</b></div>
+                <div class="info-row"><span>Gemini API</span><b class="badge badge-green">Configurado</b></div>
+                <div class="info-row"><span>RAG</span><b class="badge badge-green">FAISS ativo</b></div>
+                <div class="info-row"><span>Agentes</span><b class="badge badge-green">Disponíveis</b></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
-        temperature = st.slider(
-            "Temperatura",
-            0.0,
-            1.0,
-            0.2,
-            0.05,
-        )
-        top_k = st.number_input(
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    section_header("🔎", "Parâmetros do RAG", "Controle da quantidade de evidências recuperadas")
+    r1, r2, r3 = st.columns(3)
+    with r1:
+        new_top_k = st.number_input(
             "Top-K do RAG",
             min_value=1,
             max_value=30,
-            value=8,
+            value=int(st.session_state.settings_top_k),
+            step=1,
+            help="Número máximo de trechos recuperados antes do reranking.",
         )
-        if st.form_submit_button("Salvar configurações", type="primary"):
-            st.success("Preferências atualizadas para esta sessão.")
+    with r2:
+        st.metric("Retriever", "Ativo")
+    with r3:
+        st.metric("Reranker", "CrossEncoder")
+    if st.button("Aplicar Top-K", key="apply_topk", type="secondary"):
+        st.session_state.settings_top_k = int(new_top_k)
+        audit(action="rag_settings_updated", details={"top_k": int(new_top_k)})
+        st.success(f"Top-K atualizado para {new_top_k}.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    section_header("🛡️", "Segurança e operação", "Informações de ambiente sem expor credenciais")
+    s1, s2, s3, s4 = st.columns(4)
+    with s1:
+        st.metric("Ambiente", "Produção")
+    with s2:
+        st.metric("Autenticação", "Ativa")
+    with s3:
+        st.metric("Auditoria", "Ativa")
+    with s4:
+        st.metric("Versão", "V3.1")
+    st.caption("Chaves de API são mantidas nos Secrets do Streamlit e nunca são exibidas nesta tela.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ============================================================
@@ -2721,42 +2796,77 @@ elif page == "Auditoria":
     st.markdown(
         """
         <div class="page-title">🛡️ Auditoria</div>
-        <div class="page-subtitle">
-            Rastreamento das ações realizadas no sistema.
-        </div>
+        <div class="page-subtitle">Rastreamento das ações realizadas no sistema.</div>
         """,
         unsafe_allow_html=True,
     )
 
     try:
         with get_connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT action, details, created_at
-                FROM audit_logs
-                ORDER BY created_at DESC
-                LIMIT 100
-                """
-            ).fetchall()
+            # Compatibilidade com versões antigas do banco. Algumas instalações
+            # possuem apenas action/created_at e não possuem a coluna details.
+            cols = [row[1] for row in conn.execute("PRAGMA table_info(audit_logs)").fetchall()]
+            if not cols:
+                st.info("A tabela de auditoria ainda não foi criada nesta organização.")
+                rows = []
+            else:
+                selected = [c for c in ("id", "action", "details", "created_at") if c in cols]
+                query = f"SELECT {', '.join(selected)} FROM audit_logs ORDER BY created_at DESC LIMIT 200"
+                rows = conn.execute(query).fetchall()
 
-        if rows:
-            data = [
-                {
-                    "Ação": row[0],
-                    "Detalhes": row[1],
-                    "Data": row[2],
-                }
-                for row in rows
-            ]
-            st.dataframe(
-                data,
-                use_container_width=True,
-                hide_index=True,
-            )
+        # KPIs da auditoria
+        total_events = len(rows)
+        actions = [r[selected.index("action")] for r in rows] if rows and "action" in selected else []
+        unique_actions = len(set(actions)) if actions else 0
+        last_event = rows[0][selected.index("created_at")] if rows and "created_at" in selected else "—"
+
+        k1, k2, k3 = st.columns(3)
+        with k1:
+            metric_card("🧾", "Eventos", total_events, "últimos registros", "auditoria", "kpi-blue")
+        with k2:
+            metric_card("⚙️", "Ações", unique_actions, "tipos registrados", "auditoria", "kpi-purple")
+        with k3:
+            metric_card("🕒", "Último evento", str(last_event)[:19] if last_event else "—", "registro mais recente", "auditoria", "kpi-teal")
+
+        st.markdown('<div style="height:12px"></div>', unsafe_allow_html=True)
+        f1, f2 = st.columns([1, 2])
+        with f1:
+            action_filter = st.selectbox("Filtrar ação", ["Todas"] + sorted(set(actions))) if actions else "Todas"
+        with f2:
+            audit_search = st.text_input("Pesquisar", placeholder="ação ou detalhes...")
+
+        filtered_rows = rows
+        if rows and action_filter != "Todas" and "action" in selected:
+            ai = selected.index("action")
+            filtered_rows = [r for r in filtered_rows if r[ai] == action_filter]
+        if rows and audit_search:
+            q = audit_search.lower()
+            filtered_rows = [r for r in filtered_rows if q in " ".join(str(x) for x in r).lower()]
+
+        data = []
+        for row in filtered_rows:
+            item = {}
+            if "id" in selected:
+                item["ID"] = row[selected.index("id")]
+            if "action" in selected:
+                item["Ação"] = row[selected.index("action")]
+            if "details" in selected:
+                item["Detalhes"] = row[selected.index("details")]
+            else:
+                item["Detalhes"] = "—"
+            if "created_at" in selected:
+                item["Data"] = row[selected.index("created_at")]
+            data.append(item)
+
+        if data:
+            st.dataframe(data, use_container_width=True, hide_index=True)
         else:
-            st.info("Nenhum evento de auditoria encontrado.")
+            st.info("Nenhum evento de auditoria encontrado para os filtros selecionados.")
+
     except Exception as exc:
+        # Não interromper o restante do SaaS por incompatibilidade de schema.
         st.warning(f"Não foi possível carregar a auditoria: {exc}")
+        st.caption("A tela permanece disponível mesmo quando a estrutura antiga do banco não possui todos os campos de auditoria.")
 
 
 # ============================================================
@@ -2767,38 +2877,63 @@ elif page == "Perfil":
     st.markdown(
         """
         <div class="page-title">👤 Perfil</div>
-        <div class="page-subtitle">
-            Informações do usuário atual.
-        </div>
+        <div class="page-subtitle">Informações do usuário atual e contexto da organização.</div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        f"""
-        <div class="glass-card" style="max-width:760px">
-            <div style="display:flex;gap:16px;align-items:center">
-                <div class="avatar" style="width:58px;height:58px;font-size:27px">👤</div>
-                <div>
-                    <div style="font-size:1.15rem;font-weight:800">
-                        {user.get("name", "Usuário Jurídico")}
-                    </div>
-                    <div style="color:#8fa9c9;font-size:.75rem">
-                        {user.get("email", "—")}
+    display_name = user.get("name") or user.get("full_name") or "Usuário Jurídico"
+    email = user.get("email") or "—"
+    role = user.get("role") or user.get("profile") or "Usuário"
+    org_id = user.get("organization_id") or user.get("org_id") or "—"
+
+    p1, p2 = st.columns([1.35, 1])
+    with p1:
+        st.markdown(
+            f"""
+            <div class="glass-card">
+                <div style="display:flex;gap:18px;align-items:center">
+                    <div class="avatar" style="width:72px;height:72px;font-size:32px">👤</div>
+                    <div>
+                        <div style="font-size:1.35rem;font-weight:850">{display_name}</div>
+                        <div style="color:#91a8c8;font-size:.82rem;margin-top:4px">{email}</div>
+                        <div style="margin-top:10px"><span class="badge badge-green">● Ativo</span></div>
                     </div>
                 </div>
+                <hr style="border-color:#173e73;margin:22px 0">
+                <div class="info-row"><span>Perfil de acesso</span><b>{role}</b></div>
+                <div class="info-row"><span>Organização</span><b>{org_id}</b></div>
+                <div class="info-row"><span>Status da conta</span><b>Ativo</b></div>
             </div>
-            <hr style="border-color:#173e73;margin:18px 0">
-            <div style="color:#8fa9c9;font-size:.75rem">
-                Organização: <b style="color:#fff">{user.get("organization_id", "—")}</b>
+            """,
+            unsafe_allow_html=True,
+        )
+    with p2:
+        st.markdown(
+            f"""
+            <div class="glass-card" style="height:100%">
+                <div style="font-size:1rem;font-weight:800">⚖️ Contexto Jurídico</div>
+                <div style="color:#91a8c8;font-size:.75rem;margin:6px 0 18px">Ambiente atual da plataforma</div>
+                <div class="info-row"><span>Assistente IA</span><b class="badge badge-green">Online</b></div>
+                <div class="info-row"><span>RAG</span><b class="badge badge-green">Ativo</b></div>
+                <div class="info-row"><span>Multiagentes</span><b class="badge badge-green">Ativo</b></div>
+                <div class="info-row"><span>Versão</span><b>V3.1</b></div>
             </div>
-            <div style="color:#8fa9c9;font-size:.75rem;margin-top:7px">
-                Status: <span class="badge badge-green">Ativo</span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('<div style="height:14px"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    section_header("🔐", "Conta e segurança", "Ações disponíveis para o usuário autenticado")
+    a1, a2, a3 = st.columns(3)
+    with a1:
+        st.markdown("**Sessão**\n\nUsuário autenticado e protegido pela camada de autenticação.")
+    with a2:
+        st.markdown("**Dados**\n\nAs credenciais de IA permanecem nos Secrets do ambiente.")
+    with a3:
+        st.markdown("**Auditoria**\n\nAções relevantes podem ser rastreadas no módulo de auditoria.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ============================================================

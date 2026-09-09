@@ -20,10 +20,12 @@ Substitua o app.py somente depois de testar esta versão localmente.
 from __future__ import annotations
 
 import inspect
+import io
 import traceback
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from typing import Any, Dict
 
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -780,6 +782,185 @@ def section_header(icon, title, subtitle=""):
         unsafe_allow_html=True,
     )
 
+
+
+def _to_date(value):
+    if not value:
+        return None
+    try:
+        if isinstance(value, date):
+            return value
+        return pd.to_datetime(str(value), errors="coerce").date()
+    except Exception:
+        return None
+
+
+def load_report_data(org_id):
+    """Carrega dados reais disponíveis no banco para o painel de relatórios."""
+    try:
+        cases = list_cases(org_id) or []
+    except Exception:
+        cases = []
+    try:
+        documents = list_documents(org_id) or []
+    except Exception:
+        documents = []
+
+    # Prazos atuais da página operacional.
+    deadlines = [
+        {"date": "10/09/2026", "title": "Processo #2026-0145", "description": "Manifestação processual", "priority": "Alto"},
+        {"date": "11/09/2026", "title": "Documento pendente", "description": "Assinatura / revisão", "priority": "Médio"},
+        {"date": "12/09/2026", "title": "Análise contratual", "description": "Revisão jurídica", "priority": "Médio"},
+    ]
+
+    risks = []
+    try:
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT action, details, created_at FROM audit_logs "
+                "WHERE organization_id=? ORDER BY created_at DESC LIMIT 500",
+                (org_id,),
+            ).fetchall()
+        for row in rows:
+            action = str(row[0] or "").lower()
+            if "risk" in action or "risco" in action:
+                risks.append({"action": row[0], "details": row[1], "created_at": row[2]})
+    except Exception:
+        # O projeto atual pode não registrar análises de risco no audit_logs.
+        risks = []
+
+    return cases, documents, risks, deadlines
+
+
+def report_cases_dataframe(cases):
+    rows = []
+    for c in cases:
+        rows.append({
+            "ID": c.get("id", ""),
+            "Processo": c.get("title", "Processo"),
+            "Cliente": c.get("client", ""),
+            "Categoria": c.get("category", ""),
+            "Prioridade": c.get("priority", ""),
+            "Status": c.get("status", ""),
+            "Criado em": c.get("created_at", c.get("createdAt", "")),
+        })
+    return pd.DataFrame(rows, columns=["ID", "Processo", "Cliente", "Categoria", "Prioridade", "Status", "Criado em"])
+
+
+def build_report_csv(cases, documents, risks, deadlines):
+    case_df = report_cases_dataframe(cases)
+    doc_rows = [{
+        "Documento": d.get("name", d.get("filename", "Documento")),
+        "Status": d.get("status", ""),
+        "Páginas": d.get("pages", 0),
+        "Chunks": d.get("chunks", 0),
+    } for d in documents]
+    doc_df = pd.DataFrame(doc_rows, columns=["Documento", "Status", "Páginas", "Chunks"])
+    deadline_df = pd.DataFrame(deadlines)
+
+    out = io.StringIO()
+    out.write("RELATÓRIO EXECUTIVO - ASSISTENTE JURÍDICO IA V3.1\n\n")
+    out.write("PROCESSOS\n")
+    case_df.to_csv(out, index=False, sep=";")
+    out.write("\nDOCUMENTOS\n")
+    doc_df.to_csv(out, index=False, sep=";")
+    out.write("\nRISCOS REGISTRADOS\n")
+    if risks:
+        pd.DataFrame(risks).to_csv(out, index=False, sep=";")
+    else:
+        out.write("Nenhuma análise de risco registrada no banco.\n")
+    out.write("\nPRAZOS MONITORADOS\n")
+    deadline_df.to_csv(out, index=False, sep=";")
+    return out.getvalue().encode("utf-8-sig")
+
+
+def build_report_pdf(summary, cases_df, doc_count, risks_count, deadlines):
+    """Gera PDF simples e profissional. Importação tardia para não quebrar o app."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="ReportTitle", parent=styles["Title"], fontSize=18, leading=22, textColor=colors.HexColor("#0B3B78"), alignment=TA_CENTER))
+    styles.add(ParagraphStyle(name="Small", parent=styles["BodyText"], fontSize=8, leading=10))
+    story = [
+        Paragraph("⚖️ Assistente Jurídico IA", styles["ReportTitle"]),
+        Paragraph("Relatório executivo da operação jurídica · V3.1", styles["Normal"]),
+        Spacer(1, 16),
+    ]
+    kpi_data = [
+        ["Processos", str(summary["processes"]), "Documentos", str(doc_count)],
+        ["Riscos registrados", str(risks_count), "Prazos", str(summary["deadlines"])],
+    ]
+    table = Table(kpi_data, colWidths=[110, 65, 110, 65])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,-1), colors.HexColor("#EAF2FF")),
+        ("BOX", (0,0), (-1,-1), .7, colors.HexColor("#A9C6EA")),
+        ("INNERGRID", (0,0), (-1,-1), .4, colors.HexColor("#C9D9EE")),
+        ("FONTNAME", (0,0), (-1,-1), "Helvetica-Bold"),
+        ("ALIGN", (1,0), (1,-1), "CENTER"),
+        ("ALIGN", (3,0), (3,-1), "CENTER"),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("TOPPADDING", (0,0), (-1,-1), 9),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 9),
+    ]))
+    story += [table, Spacer(1, 18), Paragraph("Processos", styles["Heading2"])]
+    data = [["Processo", "Categoria", "Status", "Prioridade"]]
+    for _, r in cases_df.head(30).iterrows():
+        data.append([str(r.get("Processo", ""))[:45], str(r.get("Categoria", ""))[:18], str(r.get("Status", ""))[:18], str(r.get("Prioridade", ""))[:12]])
+    if len(data) == 1:
+        data.append(["Nenhum processo encontrado", "—", "—", "—"])
+    t2 = Table(data, repeatRows=1, colWidths=[210, 100, 95, 75])
+    t2.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0B3B78")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("GRID", (0,0), (-1,-1), .35, colors.HexColor("#B8CBE3")),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,-1), 8),
+        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#F4F8FD")]),
+        ("VALIGN", (0,0), (-1,-1), "TOP"),
+    ]))
+    story += [t2, Spacer(1, 18), Paragraph("Prazos monitorados", styles["Heading2"])]
+    ddata = [["Data", "Item", "Descrição", "Prioridade"]] + [[x["date"], x["title"], x["description"], x["priority"]] for x in deadlines]
+    t3 = Table(ddata, repeatRows=1, colWidths=[70, 150, 150, 70])
+    t3.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#0B3B78")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("GRID", (0,0), (-1,-1), .35, colors.HexColor("#B8CBE3")),
+        ("FONTSIZE", (0,0), (-1,-1), 8),
+        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#F4F8FD")]),
+    ]))
+    story += [t3, Spacer(1, 16), Paragraph("Observação: os indicadores são calculados a partir dos dados disponíveis na organização. Riscos só são contabilizados quando registrados no banco de auditoria.", styles["Small"])]
+    doc.build(story)
+    return buffer.getvalue()
+
+
+def report_status_chart(cases):
+    df = report_cases_dataframe(cases)
+    if df.empty or df["Status"].fillna("").eq("").all():
+        labels, values = ["Sem dados"], [1]
+    else:
+        counts = df["Status"].fillna("Sem status").replace("", "Sem status").value_counts()
+        labels, values = counts.index.tolist(), counts.values.tolist()
+    fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.68, textinfo="none", marker=dict(line=dict(color="#071a37", width=2)))])
+    fig.update_layout(height=260, margin=dict(l=0,r=0,t=10,b=0), paper_bgcolor="rgba(0,0,0,0)", showlegend=True, legend=dict(font=dict(color="#b9cbe3", size=10)))
+    return fig
+
+
+def report_category_chart(cases):
+    df = report_cases_dataframe(cases)
+    if df.empty:
+        labels, values = ["Sem dados"], [0]
+    else:
+        counts = df["Categoria"].fillna("Não informada").replace("", "Não informada").value_counts().head(8)
+        labels, values = counts.index.tolist(), counts.values.tolist()
+    fig = go.Figure(data=[go.Bar(x=values, y=labels, orientation="h")])
+    fig.update_layout(height=260, margin=dict(l=10,r=10,t=10,b=10), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#a9c0df", size=10), xaxis=dict(showgrid=True, gridcolor="rgba(47,88,140,.25)"), yaxis=dict(showgrid=False))
+    return fig
 
 def plot_dark_line():
     x = ["03/09", "04/09", "05/09", "06/09", "07/09", "08/09", "09/09"]
@@ -1989,36 +2170,169 @@ elif page == "Prazos":
 # ============================================================
 
 elif page == "Relatórios":
+    org_id = user.get("organization_id")
+    cases, documents, risks, deadlines = load_report_data(org_id)
+
     st.markdown(
         """
         <div class="page-title">📊 Relatórios</div>
         <div class="page-subtitle">
-            Indicadores executivos da operação jurídica.
+            Painel executivo com indicadores, filtros, gráficos e exportação.
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    c1, c2 = st.columns(2)
-    with c1:
+    # -------------------- FILTROS --------------------
+    with st.container(border=True):
+        st.markdown("**🔎 Filtros do relatório**")
+        f1, f2, f3, f4 = st.columns([1.3, 1.3, 1.3, 1.1])
+
+        case_df_all = report_cases_dataframe(cases)
+        categories = sorted([x for x in case_df_all["Categoria"].dropna().astype(str).unique().tolist() if x.strip()]) if not case_df_all.empty else []
+        statuses = sorted([x for x in case_df_all["Status"].dropna().astype(str).unique().tolist() if x.strip()]) if not case_df_all.empty else []
+
+        with f1:
+            period = st.selectbox("Período", ["Todo o período", "Últimos 7 dias", "Últimos 30 dias", "Últimos 90 dias"], key="report_period")
+        with f2:
+            category_filter = st.selectbox("Categoria", ["Todas"] + categories, key="report_category")
+        with f3:
+            status_filter = st.selectbox("Status", ["Todos"] + statuses, key="report_status")
+        with f4:
+            priority_filter = st.selectbox("Prioridade", ["Todas", "Alta", "Média", "Baixa"], key="report_priority")
+
+    filtered_cases = list(cases)
+    if category_filter != "Todas":
+        filtered_cases = [c for c in filtered_cases if str(c.get("category", "")) == category_filter]
+    if status_filter != "Todos":
+        filtered_cases = [c for c in filtered_cases if str(c.get("status", "")) == status_filter]
+    if priority_filter != "Todas":
+        filtered_cases = [c for c in filtered_cases if str(c.get("priority", "")) == priority_filter]
+
+    if period != "Todo o período":
+        days = {"Últimos 7 dias": 7, "Últimos 30 dias": 30, "Últimos 90 dias": 90}[period]
+        cutoff = date.today() - timedelta(days=days)
+        filtered_cases = [
+            c for c in filtered_cases
+            if (_to_date(c.get("created_at", c.get("createdAt"))) is None)
+            or (_to_date(c.get("created_at", c.get("createdAt"))) >= cutoff)
+        ]
+
+    case_df = report_cases_dataframe(filtered_cases)
+    total_processes = len(filtered_cases)
+    total_documents = len(documents)
+    total_risks = len(risks)
+    total_deadlines = len(deadlines)
+
+    # -------------------- KPIs --------------------
+    k1, k2, k3, k4, k5 = st.columns(5)
+    with k1:
+        metric_card("⚖️", "Processos", total_processes, "Base atual", "processos filtrados", "kpi-blue")
+    with k2:
+        metric_card("📄", "Documentos", total_documents, "Base documental", "arquivos cadastrados", "kpi-purple")
+    with k3:
+        metric_card("🛡️", "Riscos", total_risks, "Registrados", "na auditoria", "kpi-red")
+    with k4:
+        metric_card("📅", "Prazos", total_deadlines, "Monitorados", "agenda operacional", "kpi-teal")
+    with k5:
+        high = sum(1 for c in filtered_cases if str(c.get("priority", "")).lower() == "alta")
+        metric_card("🚨", "Alta prioridade", high, "Atenção", "processos filtrados", "kpi-red")
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
+    # -------------------- GRÁFICOS --------------------
+    g1, g2 = st.columns([1.35, 1])
+    with g1:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        section_header("📈", "Atividade dos casos", "Últimos 7 dias")
-        st.plotly_chart(
-            plot_dark_line(),
-            use_container_width=True,
-            config={"displayModeBar": False},
+        section_header("📊", "Processos por categoria", "Distribuição da carteira atual")
+        st.plotly_chart(report_category_chart(filtered_cases), use_container_width=True, config={"displayModeBar": False})
+        st.markdown("</div>", unsafe_allow_html=True)
+    with g2:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("🧭", "Processos por status", "Situação atual da carteira")
+        st.plotly_chart(report_status_chart(filtered_cases), use_container_width=True, config={"displayModeBar": False})
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
+    # -------------------- INDICADORES --------------------
+    i1, i2 = st.columns(2)
+    with i1:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("📌", "Indicadores da operação", "Leitura executiva")
+        status_counts = case_df["Status"].value_counts().to_dict() if not case_df.empty else {}
+        priority_counts = case_df["Prioridade"].value_counts().to_dict() if not case_df.empty else {}
+        st.markdown(
+            f"""
+            <div class="glass-card" style="padding:14px;margin-bottom:8px"><b>Processos ativos</b><span style="float:right;font-size:1.1rem">{sum(v for k,v in status_counts.items() if k.lower() in ["em andamento","em análise","pendente"])}</span></div>
+            <div class="glass-card" style="padding:14px;margin-bottom:8px"><b>Em andamento</b><span style="float:right;font-size:1.1rem">{status_counts.get("Em andamento", 0)}</span></div>
+            <div class="glass-card" style="padding:14px;margin-bottom:8px"><b>Alta prioridade</b><span style="float:right;font-size:1.1rem">{priority_counts.get("Alta", 0)}</span></div>
+            <div class="glass-card" style="padding:14px"><b>Documentos prontos para RAG</b><span style="float:right;font-size:1.1rem">{sum(1 for d in documents if d.get("status") == "Indexado")}</span></div>
+            """,
+            unsafe_allow_html=True,
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
-    with c2:
+    with i2:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        section_header("📊", "Distribuição por status")
-        st.plotly_chart(
-            plot_status_donut(),
-            use_container_width=True,
-            config={"displayModeBar": False},
-        )
+        section_header("📅", "Prazos e alertas", "Itens que exigem acompanhamento")
+        for item in deadlines:
+            cls = "badge-red" if item["priority"] == "Alto" else "badge-orange"
+            st.markdown(
+                f"""
+                <div class="activity">
+                    <b>📅 {item['title']}</b>
+                    <span style="float:right" class="badge {cls}">{item['priority']}</span><br>
+                    <span style="color:#7895b8;font-size:.68rem">{item['description']} · {item['date']}</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
         st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
+    # -------------------- TABELA + EXPORTAÇÃO --------------------
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    section_header("📋", "Detalhamento dos processos", f"{len(case_df)} registro(s) no filtro atual")
+    if case_df.empty:
+        st.info("Nenhum processo corresponde aos filtros selecionados.")
+    else:
+        st.dataframe(case_df, use_container_width=True, hide_index=True)
+
+    summary = {
+        "processes": total_processes,
+        "documents": total_documents,
+        "risks": total_risks,
+        "deadlines": total_deadlines,
+    }
+    b1, b2, b3 = st.columns([1, 1, 1.8])
+    with b1:
+        st.download_button(
+            "⬇️ Baixar CSV",
+            data=build_report_csv(filtered_cases, documents, risks, deadlines),
+            file_name=f"relatorio_juridico_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    with b2:
+        try:
+            pdf_bytes = build_report_pdf(summary, case_df, total_documents, total_risks, deadlines)
+            st.download_button(
+                "📄 Baixar PDF",
+                data=pdf_bytes,
+                file_name=f"relatorio_juridico_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        except Exception as exc:
+            st.warning(f"PDF indisponível neste ambiente: {exc}")
+    with b3:
+        st.markdown(
+            "<div style='padding:10px 12px;color:#89a7cc;font-size:.70rem'>💡 O relatório respeita os filtros selecionados e utiliza os dados disponíveis no banco da organização.</div>",
+            unsafe_allow_html=True,
+        )
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ============================================================

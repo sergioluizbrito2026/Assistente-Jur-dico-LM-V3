@@ -994,15 +994,54 @@ def build_report_pdf(summary, cases_df, doc_count, risks_count, deadlines):
     return buffer.getvalue()
 
 
+def _chart_layout(fig, height=280, showlegend=False):
+    """Tema visual único para todos os gráficos do Legal Tech."""
+    fig.update_layout(
+        height=height,
+        margin=dict(l=8, r=8, t=12, b=8),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Inter, Segoe UI, sans-serif", color="#b9cbe3", size=11),
+        showlegend=showlegend,
+        hoverlabel=dict(
+            bgcolor="#071b3d",
+            bordercolor="#2b6fca",
+            font=dict(color="#f5f9ff", size=11),
+        ),
+        transition=dict(duration=450, easing="cubic-in-out"),
+        uirevision="legal-tech-v3",
+    )
+    return fig
+
+
 def report_status_chart(cases):
     df = report_cases_dataframe(cases)
-    if df.empty or df["Status"].fillna("").eq("").all():
+    if df.empty:
         labels, values = ["Sem dados"], [1]
     else:
         counts = df["Status"].fillna("Sem status").replace("", "Sem status").value_counts()
         labels, values = counts.index.tolist(), counts.values.tolist()
-    fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.68, textinfo="none", marker=dict(line=dict(color="#071a37", width=2)))])
-    fig.update_layout(height=260, margin=dict(l=0,r=0,t=10,b=0), paper_bgcolor="rgba(0,0,0,0)", showlegend=True, legend=dict(font=dict(color="#b9cbe3", size=10)))
+
+    palette = ["#1685ff", "#7c3aed", "#f59e0b", "#10b981", "#ec4899", "#647da2"]
+    fig = go.Figure(go.Pie(
+        labels=labels,
+        values=values,
+        hole=.70,
+        sort=False,
+        textinfo="none",
+        marker=dict(colors=palette[:len(labels)], line=dict(color="#06142e", width=3)),
+        hovertemplate="<b>%{label}</b><br>%{value} processo(s)<br>%{percent}<extra></extra>",
+    ))
+    total = sum(values)
+    fig.update_layout(
+        **_chart_layout(fig, 285, True).layout.to_plotly_json(),
+        legend=dict(orientation="v", x=1.02, y=.5, xanchor="left", font=dict(color="#a9c0df", size=10)),
+        annotations=[dict(
+            text=f"<b>{total}</b><br><span style='font-size:10px'>Processos</span>",
+            x=.5, y=.5, showarrow=False,
+            font=dict(color="#ffffff", size=22),
+        )],
+    )
     return fig
 
 
@@ -1013,79 +1052,95 @@ def report_category_chart(cases):
     else:
         counts = df["Categoria"].fillna("Não informada").replace("", "Não informada").value_counts().head(8)
         labels, values = counts.index.tolist(), counts.values.tolist()
-    fig = go.Figure(data=[go.Bar(x=values, y=labels, orientation="h")])
-    fig.update_layout(height=260, margin=dict(l=10,r=10,t=10,b=10), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#a9c0df", size=10), xaxis=dict(showgrid=True, gridcolor="rgba(47,88,140,.25)"), yaxis=dict(showgrid=False))
+
+    palette = ["#1685ff", "#7c3aed", "#06b6d4", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6", "#647da2"]
+    fig = go.Figure(go.Bar(
+        x=values,
+        y=labels,
+        orientation="h",
+        text=values,
+        textposition="outside",
+        cliponaxis=False,
+        marker=dict(color=palette[:len(labels)], line=dict(width=0)),
+        hovertemplate="<b>%{y}</b><br>%{x} processo(s)<extra></extra>",
+    ))
+    fig.update_layout(
+        **_chart_layout(fig, 285, False).layout.to_plotly_json(),
+        xaxis=dict(showgrid=True, gridcolor="rgba(89,139,203,.16)", zeroline=False, tickfont=dict(color="#7898be", size=9)),
+        yaxis=dict(showgrid=False, tickfont=dict(color="#c6d7ec", size=10), categoryorder="total ascending"),
+        bargap=.34,
+    )
     return fig
 
-def plot_dark_line():
-    x = ["03/09", "04/09", "05/09", "06/09", "07/09", "08/09", "09/09"]
-    y = [7, 8.5, 12.5, 11.7, 13.4, 16.2, 18]
+
+def plot_dark_line(cases=None):
+    """Evolução moderna e dinâmica dos processos por data de criação."""
+    rows = []
+    for item in (cases or []):
+        raw = item.get("created_at", item.get("createdAt", item.get("created"))) if isinstance(item, dict) else None
+        dt = _to_date(raw)
+        if dt:
+            rows.append(dt)
+
+    if rows:
+        series = pd.Series(rows).value_counts().sort_index().tail(14)
+        x = [d.strftime("%d/%m") for d in series.index]
+        y = series.values.tolist()
+    else:
+        # Mantém o gráfico elegante mesmo antes do primeiro cadastro.
+        x, y = [], []
+
     fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=y,
+    if x:
+        fig.add_trace(go.Scatter(
+            x=x, y=y,
             mode="lines+markers",
-            line=dict(color="#4f8cff", width=3, shape="spline"),
-            marker=dict(color="#8ec5ff", size=6),
+            name="Processos",
+            line=dict(color="#4f8cff", width=3.5, shape="spline"),
+            marker=dict(color="#d7ecff", size=7, line=dict(color="#1685ff", width=2)),
             fill="tozeroy",
-            fillcolor="rgba(37,99,235,.20)",
-            hovertemplate="%{x}: %{y}<extra></extra>",
-        )
-    )
+            fillcolor="rgba(37,99,235,.18)",
+            hovertemplate="<b>%{x}</b><br>%{y} processo(s)<extra></extra>",
+        ))
+    else:
+        fig.add_annotation(text="Sem dados suficientes para exibir a evolução", x=.5, y=.5, xref="paper", yref="paper", showarrow=False, font=dict(color="#7898be", size=12))
+
     fig.update_layout(
-        height=235,
-        margin=dict(l=8, r=8, t=10, b=5),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#91a8c8", size=10),
-        xaxis=dict(
-            showgrid=False,
-            linecolor="#183e72",
-            tickfont=dict(color="#7d9bc0"),
-        ),
-        yaxis=dict(
-            showgrid=True,
-            gridcolor="rgba(47,88,140,.25)",
-            zeroline=False,
-            tickfont=dict(color="#7d9bc0"),
-        ),
-        showlegend=False,
+        **_chart_layout(fig, 270, False).layout.to_plotly_json(),
+        xaxis=dict(showgrid=False, linecolor="#183e72", tickfont=dict(color="#7d9bc0", size=9)),
+        yaxis=dict(showgrid=True, gridcolor="rgba(89,139,203,.14)", zeroline=False, tickfont=dict(color="#7d9bc0", size=9), rangemode="tozero"),
     )
     return fig
 
 
-def plot_status_donut():
-    labels = ["Em andamento", "Em análise", "Pendente", "Arquivado"]
-    values = [12, 5, 4, 3]
-    fig = go.Figure(
-        data=[
-            go.Pie(
-                labels=labels,
-                values=values,
-                hole=.68,
-                textinfo="none",
-                marker=dict(
-                    colors=["#1785ff", "#7c3aed", "#f59e0b", "#647da2"],
-                    line=dict(color="#071a37", width=2),
-                ),
-            )
-        ]
-    )
+def plot_status_donut(cases=None):
+    """Donut do dashboard baseado nos processos reais da organização."""
+    df = report_cases_dataframe(cases or [])
+    if df.empty:
+        labels, values = ["Sem dados"], [1]
+    else:
+        counts = df["Status"].fillna("Sem status").replace("", "Sem status").value_counts()
+        labels, values = counts.index.tolist(), counts.values.tolist()
+
+    palette = ["#1685ff", "#7c3aed", "#f59e0b", "#647da2", "#10b981", "#ec4899"]
+    fig = go.Figure(go.Pie(
+        labels=labels,
+        values=values,
+        hole=.70,
+        sort=False,
+        textinfo="none",
+        marker=dict(colors=palette[:len(labels)], line=dict(color="#06142e", width=3)),
+        hovertemplate="<b>%{label}</b><br>%{value} processo(s)<br>%{percent}<extra></extra>",
+    ))
+    total = sum(values) if labels != ["Sem dados"] else 0
     fig.update_layout(
-        height=205,
-        margin=dict(l=0, r=0, t=0, b=0),
-        paper_bgcolor="rgba(0,0,0,0)",
+        **_chart_layout(fig, 220, False).layout.to_plotly_json(),
         showlegend=False,
-        annotations=[
-            dict(
-                text="<b>24</b><br><span style='font-size:10px'>Total</span>",
-                x=.5,
-                y=.5,
-                showarrow=False,
-                font=dict(color="#fff", size=21),
-            )
-        ],
+        annotations=[dict(
+            text=f"<b>{total}</b><br><span style='font-size:10px'>Total</span>",
+            x=.5, y=.5, showarrow=False,
+            font=dict(color="#ffffff", size=21),
+        )],
     )
     return fig
 
@@ -1376,6 +1431,10 @@ if global_search and global_search.strip():
 if page == "Dashboard":
     org_id = user.get("organization_id")
     total_docs, total_cases = get_counts(org_id)
+    try:
+        dashboard_cases = list_cases(org_id) or []
+    except Exception:
+        dashboard_cases = []
 
     # valores reais quando disponíveis; não fabricamos números do banco
     docs_value = total_docs
@@ -1423,7 +1482,7 @@ if page == "Dashboard":
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         section_header("📊", "Evolução dos Casos", "Visão operacional")
         st.plotly_chart(
-            plot_dark_line(),
+            plot_dark_line(dashboard_cases),
             use_container_width=True,
             config={"displayModeBar": False},
         )
@@ -1437,7 +1496,7 @@ if page == "Dashboard":
             st.markdown('<div class="section-card">', unsafe_allow_html=True)
             section_header("📈", "Processos por Status", "Distribuição atual")
             st.plotly_chart(
-                plot_status_donut(),
+                plot_status_donut(dashboard_cases),
                 use_container_width=True,
                 config={"displayModeBar": False},
             )
@@ -2296,6 +2355,12 @@ elif page == "Relatórios":
     st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
 
     # -------------------- GRÁFICOS --------------------
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    section_header("📈", "Evolução da carteira", "Processos cadastrados ao longo do tempo")
+    st.plotly_chart(plot_dark_line(filtered_cases), use_container_width=True, config={"displayModeBar": False})
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
     g1, g2 = st.columns([1.35, 1])
     with g1:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)

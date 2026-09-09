@@ -1033,8 +1033,8 @@ def report_status_chart(cases):
         hovertemplate="<b>%{label}</b><br>%{value} processo(s)<br>%{percent}<extra></extra>",
     ))
     total = sum(values)
+    _chart_layout(fig, 285, True)
     fig.update_layout(
-        **_chart_layout(fig, 285, True).layout.to_plotly_json(),
         legend=dict(orientation="v", x=1.02, y=.5, xanchor="left", font=dict(color="#a9c0df", size=10)),
         annotations=[dict(
             text=f"<b>{total}</b><br><span style='font-size:10px'>Processos</span>",
@@ -1064,8 +1064,8 @@ def report_category_chart(cases):
         marker=dict(color=palette[:len(labels)], line=dict(width=0)),
         hovertemplate="<b>%{y}</b><br>%{x} processo(s)<extra></extra>",
     ))
+    _chart_layout(fig, 285, False)
     fig.update_layout(
-        **_chart_layout(fig, 285, False).layout.to_plotly_json(),
         xaxis=dict(showgrid=True, gridcolor="rgba(89,139,203,.16)", zeroline=False, tickfont=dict(color="#7898be", size=9)),
         yaxis=dict(showgrid=False, tickfont=dict(color="#c6d7ec", size=10), categoryorder="total ascending"),
         bargap=.34,
@@ -1105,8 +1105,8 @@ def plot_dark_line(cases=None):
     else:
         fig.add_annotation(text="Sem dados suficientes para exibir a evolução", x=.5, y=.5, xref="paper", yref="paper", showarrow=False, font=dict(color="#7898be", size=12))
 
+    _chart_layout(fig, 270, False)
     fig.update_layout(
-        **_chart_layout(fig, 270, False).layout.to_plotly_json(),
         xaxis=dict(showgrid=False, linecolor="#183e72", tickfont=dict(color="#7d9bc0", size=9)),
         yaxis=dict(showgrid=True, gridcolor="rgba(89,139,203,.14)", zeroline=False, tickfont=dict(color="#7d9bc0", size=9), rangemode="tozero"),
     )
@@ -1133,8 +1133,8 @@ def plot_status_donut(cases=None):
         hovertemplate="<b>%{label}</b><br>%{value} processo(s)<br>%{percent}<extra></extra>",
     ))
     total = sum(values) if labels != ["Sem dados"] else 0
+    _chart_layout(fig, 220, False)
     fig.update_layout(
-        **_chart_layout(fig, 220, False).layout.to_plotly_json(),
         showlegend=False,
         annotations=[dict(
             text=f"<b>{total}</b><br><span style='font-size:10px'>Total</span>",

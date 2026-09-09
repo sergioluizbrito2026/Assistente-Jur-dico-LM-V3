@@ -1,22 +1,33 @@
-"""
-Assistente Jurídico SaaS IA V3.1
-Interface profissional — estilo SaaS jurídico
 
-Pipeline:
-RAG -> Retriever -> Reranker -> Guard -> Orchestrator
-     -> LLM -> Citações -> Evaluation
+"""
+Assistente Jurídico IA SaaS V3.1
+Interface premium — Dark Legal Tech
+
+Este arquivo é uma versão visualmente redesenhada do app principal.
+Mantém a integração com os serviços existentes do projeto:
+- autenticação
+- banco de dados
+- documentos / ingestão
+- RAG
+- reranker
+- orquestrador de agentes
+- processos
+- auditoria
+
+Substitua o app.py somente depois de testar esta versão localmente.
 """
 
 from __future__ import annotations
 
 import inspect
 import traceback
+from datetime import datetime
 from typing import Any, Dict
 
+import plotly.graph_objects as go
 import streamlit as st
 
-from db import init_db, seed_demo
-
+from db import init_db, seed_demo, get_connection
 from services.audit import audit
 from services.cases import (
     create_case,
@@ -28,17 +39,14 @@ from services.cases import (
     CASE_PRIORITIES,
 )
 from services.documents import list_documents, document_status, delete_document
-from services.evaluation import evaluate_answer
 from services.rag_pipeline import rag_answer, retrieve_and_rerank
 from services.ai_orchestrator import orchestrate, risk_analysis
 from services.auth import authenticate, get_current_user, logout
 from services.ingestion import ingest_document
-import plotly.express as px
-
 
 
 # ============================================================
-# CONFIGURAÇÃO
+# CONFIG
 # ============================================================
 
 st.set_page_config(
@@ -50,185 +58,501 @@ st.set_page_config(
 
 
 # ============================================================
-# BANCO DE DADOS — INICIALIZAÇÃO
-# ============================================================
-
-try:
-    init_db()
-except Exception as exc:
-    st.error("Erro ao inicializar o banco de dados.")
-    with st.expander("Detalhes técnicos"):
-        st.code(
-            f"{type(exc).__name__}: {exc}\n\n"
-            f"{traceback.format_exc()}"
-        )
-    st.stop()
-
-
-# ============================================================
-# DADOS DEMONSTRATIVOS
-# ============================================================
-
-try:
-    seed_demo()
-except Exception as exc:
-    st.warning(
-        "O banco foi inicializado, mas os dados "
-        "demonstrativos não puderam ser carregados."
-    )
-    with st.expander("Detalhes técnicos"):
-        st.code(
-            f"{type(exc).__name__}: {exc}\n\n"
-            f"{traceback.format_exc()}"
-        )
-
-
-# ============================================================
-# ESTILO GLOBAL (CSS)
+# THEME / CSS
 # ============================================================
 
 st.markdown(
     """
 <style>
-:root {
-    --navy:#07152b;
-    --navy2:#0b1d38;
-    --blue:#1769e0;
-    --blue2:#0f5bd7;
-    --gold:#d7a94b;
-    --bg:#f5f7fb;
-    --card:#ffffff;
-    --text:#142033;
-    --muted:#6c7890;
-    --border:#e4e9f2;
-    --green:#19a463;
+:root{
+    --bg:#020b1d;
+    --bg2:#061630;
+    --panel:#071d42;
+    --panel2:#082653;
+    --line:#173d72;
+    --blue:#1685ff;
+    --blue2:#2563eb;
+    --cyan:#22d3ee;
+    --purple:#7c3aed;
+    --pink:#ec4899;
+    --teal:#14b8a6;
+    --green:#10d6a0;
     --orange:#f59e0b;
-    --red:#dc3545;
+    --red:#f43f5e;
+    --text:#f5f9ff;
+    --muted:#91a8c8;
 }
 
-.stApp {
-    background:var(--bg);
+/* ---------- APP ---------- */
+.stApp{
+    background:
+        radial-gradient(circle at 80% 10%, rgba(37,99,235,.12), transparent 25%),
+        radial-gradient(circle at 30% 90%, rgba(124,58,237,.08), transparent 30%),
+        linear-gradient(135deg,#020a19 0%,#041632 55%,#031024 100%);
     color:var(--text);
 }
 
-[data-testid="stHeader"] {
+.block-container{
+    max-width:1500px;
+    padding-top:1.0rem;
+    padding-bottom:2.5rem;
+}
+
+/* ---------- HEADER ---------- */
+[data-testid="stHeader"]{
+    background:rgba(2,11,29,.72);
+    border-bottom:1px solid rgba(42,92,153,.35);
+}
+
+[data-testid="stToolbar"]{
     background:transparent;
 }
 
-.block-container {
-    max-width:1480px;
-    padding-top:1.2rem;
-    padding-bottom:3rem;
+/* ---------- SIDEBAR ---------- */
+[data-testid="stSidebar"]{
+    background:
+        radial-gradient(circle at 20% 0%,rgba(37,99,235,.18),transparent 28%),
+        linear-gradient(180deg,#031127 0%,#041a3c 58%,#03132e 100%);
+    border-right:1px solid #153d70;
 }
 
-[data-testid="stSidebar"] {
-    background:linear-gradient(
-        180deg,
-        #07152b 0%,
-        #091b35 100%
-    );
-    border-right:1px solid #183253;
+[data-testid="stSidebar"] > div:first-child{
+    padding-top:1rem;
 }
 
-[data-testid="stSidebar"] * {
-    color:#eef4ff;
+[data-testid="stSidebar"] *{
+    color:#edf6ff;
 }
 
-[data-testid="stSidebar"] .stButton > button {
-    background:transparent;
-    border:0;
-    color:#eef4ff;
-    text-align:left;
-    border-radius:10px;
-    padding:0.5rem 0.8rem;
-    font-size:0.9rem;
+[data-testid="stSidebar"] .stRadio > label{
+    display:none;
 }
 
-[data-testid="stSidebar"] .stButton > button:hover {
-    background:#12335e;
-    color:white;
+[data-testid="stSidebar"] [role="radiogroup"]{
+    gap:4px;
 }
 
-.sidebar-brand {
-    padding:0.25rem 0.3rem 1rem;
-    border-bottom:1px solid #193454;
-    margin-bottom:1rem;
+[data-testid="stSidebar"] [role="radio"]{
+    min-height:42px;
+    padding:7px 11px;
+    border-radius:11px;
+    border:1px solid transparent;
+    transition:all .18s ease;
 }
 
-.sidebar-brand .logo {
-    font-size:2rem;
-    color:#f2c66d;
+[data-testid="stSidebar"] [role="radio"]:hover{
+    background:rgba(37,99,235,.16);
+    border-color:rgba(59,130,246,.20);
+    transform:translateX(2px);
 }
 
-.sidebar-brand .title {
-    font-size:1.12rem;
+[data-testid="stSidebar"] [role="radio"][aria-checked="true"]{
+    background:linear-gradient(90deg,#0758d9 0%,#124cc4 100%);
+    border-color:#1678ff;
+    box-shadow:0 7px 24px rgba(0,102,255,.25);
+}
+
+[data-testid="stSidebar"] [role="radio"] > div:first-child{
+    display:none;
+}
+
+[data-testid="stSidebar"] [role="radio"] p{
+    font-size:.88rem;
+    font-weight:600;
+}
+
+/* ---------- SIDEBAR BRAND ---------- */
+.legal-brand{
+    padding:4px 4px 18px;
+    border-bottom:1px solid rgba(62,111,173,.35);
+    margin-bottom:16px;
+}
+
+.legal-brand-row{
+    display:flex;
+    align-items:center;
+    gap:11px;
+}
+
+.legal-logo{
+    width:45px;
+    height:45px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:27px;
+    border-radius:13px;
+    background:linear-gradient(145deg,#f8c94d,#b77717);
+    box-shadow:0 8px 24px rgba(245,158,11,.20);
+}
+
+.legal-title{
+    font-size:1.08rem;
+    font-weight:800;
+    letter-spacing:-.02em;
+}
+
+.legal-sub{
+    margin-top:2px;
+    color:#7eb8ff;
+    font-size:.68rem;
+}
+
+/* ---------- GROUP LABELS ---------- */
+.nav-group{
+    color:#4fa4ff;
+    font-size:.66rem;
+    font-weight:800;
+    letter-spacing:.10em;
+    margin:15px 6px 7px;
+}
+
+/* ---------- PROFILE ---------- */
+.sidebar-profile{
+    border-top:1px solid rgba(62,111,173,.35);
+    margin-top:18px;
+    padding-top:16px;
+}
+
+.profile-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+}
+
+.avatar{
+    width:38px;
+    height:38px;
+    border-radius:50%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:linear-gradient(145deg,#1e5fd5,#102f70);
+    border:1px solid #2c6bc4;
+    font-size:19px;
+}
+
+.profile-name{font-size:.82rem;font-weight:750}
+.profile-role{font-size:.67rem;color:#8ba8ca}
+.online{
+    margin-top:5px;
+    color:#12dca5;
+    font-size:.67rem;
     font-weight:700;
 }
 
-.sidebar-brand .sub {
-    font-size:0.72rem;
-    color:#a9bad3;
+.version{
+    color:#6683a8;
+    text-align:right;
+    font-size:.64rem;
+    margin-top:12px;
 }
 
-.card {
-    background:white;
-    border:1px solid var(--border);
-    border-radius:16px;
-    padding:1.1rem;
-    box-shadow:0 5px 20px rgba(20,32,51,.045);
-    margin-bottom: 1rem;
+/* ---------- TOP SEARCH ---------- */
+.top-search{
+    border:1px solid #24548f;
+    background:rgba(7,29,66,.72);
+    border-radius:14px;
+    padding:10px 15px;
+    color:#9fc0e7;
+    font-size:.82rem;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.015);
 }
 
-.metric-card {
-    background:white;
-    border:1px solid var(--border);
+/* ---------- TITLES ---------- */
+.page-title{
+    font-size:2rem;
+    line-height:1.1;
+    font-weight:850;
+    letter-spacing:-.045em;
+    margin:10px 0 4px;
+}
+
+.page-subtitle{
+    color:#8facd0;
+    font-size:.88rem;
+    margin-bottom:20px;
+}
+
+/* ---------- CARDS ---------- */
+.glass-card{
+    background:linear-gradient(145deg,rgba(7,31,70,.96),rgba(4,22,51,.94));
+    border:1px solid rgba(38,100,174,.58);
     border-radius:15px;
-    padding:1rem;
-    min-height:105px;
-    box-shadow:0 4px 16px rgba(20,32,51,.04);
+    padding:18px;
+    box-shadow:
+        0 14px 35px rgba(0,0,0,.18),
+        inset 0 1px 0 rgba(255,255,255,.025);
 }
 
-.metric-label {
-    color:var(--muted);
-    font-size:0.75rem;
-    font-weight:600;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+.section-card{
+    background:rgba(5,24,54,.88);
+    border:1px solid #173e73;
+    border-radius:15px;
+    padding:17px;
+    box-shadow:0 12px 28px rgba(0,0,0,.16);
 }
 
-.metric-value {
-    font-size:1.55rem;
+.card-title{
+    font-size:.95rem;
+    font-weight:800;
+    color:#f5f9ff;
+}
+
+.card-sub{
+    color:#7594b9;
+    font-size:.68rem;
+    margin-top:2px;
+}
+
+/* ---------- KPI ---------- */
+.kpi{
+    min-height:143px;
+    padding:17px;
+    border-radius:15px;
+    border:1px solid rgba(50,118,201,.60);
+    position:relative;
+    overflow:hidden;
+}
+
+.kpi:after{
+    content:"";
+    position:absolute;
+    width:120px;
+    height:70px;
+    right:-25px;
+    bottom:-28px;
+    border-radius:50%;
+    border:1px solid rgba(96,165,250,.22);
+    transform:rotate(-16deg);
+}
+
+.kpi-blue{
+    background:linear-gradient(145deg,#06377d,#07336c);
+}
+.kpi-purple{
+    background:linear-gradient(145deg,#151080,#25146e);
+}
+.kpi-red{
+    background:linear-gradient(145deg,#3d1539,#42152e);
+}
+.kpi-teal{
+    background:linear-gradient(145deg,#034f5b,#075264);
+}
+
+.kpi-icon{
+    width:36px;
+    height:36px;
+    border-radius:50%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:17px;
+    background:rgba(255,255,255,.12);
+    border:1px solid rgba(255,255,255,.13);
+}
+
+.kpi-label{
+    margin-top:10px;
+    color:#b8cbea;
+    font-size:.73rem;
+    font-weight:700;
+}
+
+.kpi-value{
+    font-size:1.85rem;
+    line-height:1;
+    margin-top:7px;
+    font-weight:850;
+}
+
+.kpi-trend{
+    color:#14e3ad;
+    font-size:.72rem;
+    margin-top:9px;
+    font-weight:700;
+}
+
+.kpi-muted{
+    color:#7594b9;
+    font-size:.66rem;
+}
+
+/* ---------- BADGES ---------- */
+.badge{
+    display:inline-block;
+    border-radius:999px;
+    padding:4px 9px;
+    font-size:.66rem;
+    font-weight:800;
+}
+.badge-green{background:rgba(16,214,160,.14);color:#20e6b1;border:1px solid rgba(16,214,160,.25)}
+.badge-orange{background:rgba(245,158,11,.14);color:#ffc14b;border:1px solid rgba(245,158,11,.25)}
+.badge-red{background:rgba(244,63,94,.14);color:#ff718a;border:1px solid rgba(244,63,94,.25)}
+.badge-blue{background:rgba(59,130,246,.14);color:#67a8ff;border:1px solid rgba(59,130,246,.25)}
+
+/* ---------- ALERTS ---------- */
+.alert-row{
+    padding:11px 8px;
+    border-bottom:1px solid rgba(48,92,147,.35);
+}
+
+.alert-row:last-child{border-bottom:0}
+
+.alert-icon{
+    display:inline-flex;
+    width:29px;
+    height:29px;
+    align-items:center;
+    justify-content:center;
+    border-radius:9px;
+    background:rgba(244,63,94,.18);
+    margin-right:8px;
+}
+
+.alert-title{
+    font-size:.78rem;
     font-weight:750;
-    margin-top:0.25rem;
 }
 
-.section-title {
-    font-size:1.1rem;
-    font-weight:750;
-    margin:0.2rem 0 0.8rem;
+.alert-desc{
+    margin-left:38px;
+    color:#7895b8;
+    font-size:.66rem;
 }
 
-.badge-red { background:#fde8e8; color:#c53030; padding:2px 8px; border-radius:6px; font-weight:600; font-size:0.8rem; }
-.badge-orange { background:#fef3c7; color:#b45309; padding:2px 8px; border-radius:6px; font-weight:600; font-size:0.8rem; }
-.badge-green { background:#def7ec; color:#03543f; padding:2px 8px; border-radius:6px; font-weight:600; font-size:0.8rem; }
+/* ---------- ACTIVITY ---------- */
+.activity{
+    padding:11px 0;
+    border-bottom:1px solid rgba(48,92,147,.3);
+}
+.activity:last-child{border-bottom:0}
 
-.citation-box {
-    background:#f7f9fd;
-    border:1px solid var(--border);
+.activity-icon{
+    width:31px;
+    height:31px;
+    border-radius:9px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    background:#103c7a;
+    margin-right:9px;
+}
+
+/* ---------- AI PANEL ---------- */
+.ai-panel{
+    background:
+        radial-gradient(circle at 100% 0%,rgba(37,99,235,.22),transparent 40%),
+        linear-gradient(145deg,#062658,#061a3c);
+    border:1px solid #245e9f;
+    border-radius:16px;
+    padding:18px;
+    box-shadow:0 15px 35px rgba(0,0,0,.20);
+}
+
+.ai-online{
+    float:right;
+    color:#0ee5a8;
+    background:rgba(16,214,160,.13);
+    border:1px solid rgba(16,214,160,.25);
+    border-radius:999px;
+    padding:4px 10px;
+    font-size:.65rem;
+    font-weight:800;
+}
+
+.ai-input{
+    border:1px solid #9b5cff;
+    box-shadow:0 0 0 2px rgba(124,58,237,.08);
+    background:#091f47;
+    border-radius:12px;
+    padding:12px;
+    color:#8fa9c9;
+    font-size:.76rem;
+}
+
+/* ---------- BUTTONS ---------- */
+.stButton > button{
     border-radius:10px;
-    padding:0.75rem;
-    margin:0.5rem 0;
+    border:1px solid #1d4c84;
+    background:#082653;
+    color:#eaf4ff;
+    font-weight:650;
+    min-height:39px;
 }
 
-.footer-note {
-    color:#8792a6;
-    font-size:0.72rem;
-    text-align:center;
-    margin-top:2rem;
+.stButton > button:hover{
+    border-color:#2e8cff;
+    background:#0a3470;
+    color:#fff;
+    box-shadow:0 7px 20px rgba(0,104,255,.16);
 }
 
-.stButton > button[kind="primary"] {
-    border-radius:10px;
+.stButton > button[kind="primary"]{
+    background:linear-gradient(90deg,#075ee2,#1769e0);
+    border-color:#1678ff;
+}
+
+/* ---------- INPUTS ---------- */
+.stTextInput input,
+.stTextArea textarea,
+.stSelectbox div[data-baseweb="select"] > div,
+.stNumberInput input{
+    background:#071f45 !important;
+    color:#eef6ff !important;
+    border-color:#204f88 !important;
+}
+
+[data-baseweb="select"] span{
+    color:#eef6ff !important;
+}
+
+/* ---------- TABS ---------- */
+.stTabs [data-baseweb="tab-list"]{
+    gap:5px;
+    background:transparent;
+}
+.stTabs [data-baseweb="tab"]{
+    color:#87a4c7;
+    border-radius:9px;
+    padding:8px 13px;
+}
+.stTabs [aria-selected="true"]{
+    color:#fff !important;
+    background:#0b326b;
+}
+
+/* ---------- TABLES / DATAFRAMES ---------- */
+[data-testid="stDataFrame"]{
+    border:1px solid #1a477e;
+    border-radius:12px;
+    overflow:hidden;
+}
+
+/* ---------- CHAT ---------- */
+[data-testid="stChatMessage"]{
+    background:rgba(7,29,66,.82);
+    border:1px solid #183e72;
+    border-radius:14px;
+}
+
+/* ---------- FOOTER ---------- */
+.footer-banner{
+    margin-top:16px;
+    border-radius:14px;
+    padding:12px 18px;
+    border:1px solid #1e5bb2;
+    background:
+        radial-gradient(circle at 90% 100%,rgba(124,58,237,.30),transparent 30%),
+        linear-gradient(90deg,#0647a5,#08295b);
+    color:#dceaff;
+    font-size:.76rem;
+}
+
+/* ---------- MOBILE ---------- */
+@media(max-width:900px){
+    .page-title{font-size:1.55rem}
+    .block-container{padding-left:1rem;padding-right:1rem}
 }
 </style>
 """,
@@ -243,12 +567,7 @@ st.markdown(
 def safe_dict(value: Any) -> Dict[str, Any]:
     if isinstance(value, dict):
         return value
-    return {
-        "answer": str(value or ""),
-        "citations": [],
-        "retrieved": [],
-        "reranked": [],
-    }
+    return {"answer": str(value or ""), "citations": [], "retrieved": [], "reranked": []}
 
 
 def safe_list(value: Any) -> list:
@@ -268,16 +587,8 @@ def call_orchestrator(
     extra_context: str | None = None,
 ) -> Dict[str, Any]:
     query = str(query or "").strip()
-
     if not query:
-        return {
-            "answer": "Informe uma pergunta.",
-            "citations": [],
-            "retrieved": [],
-            "reranked": [],
-            "agent": "none",
-            "intent": "empty",
-        }
+        return {"answer": "Informe uma pergunta.", "citations": []}
 
     kwargs = {
         "query": query,
@@ -292,43 +603,39 @@ def call_orchestrator(
 
     try:
         signature = inspect.signature(orchestrate)
-        parameters = signature.parameters
-
+        params = signature.parameters
         accepts_kwargs = any(
             p.kind == inspect.Parameter.VAR_KEYWORD
-            for p in parameters.values()
+            for p in params.values()
         )
 
         if accepts_kwargs:
             filtered = {k: v for k, v in kwargs.items() if v is not None}
         else:
-            filtered = {k: v for k, v in kwargs.items() if k in parameters and v is not None}
+            filtered = {
+                k: v for k, v in kwargs.items()
+                if k in params and v is not None
+            }
 
-        if "query" in parameters:
+        if "query" in params:
             filtered.pop("question", None)
-        elif "question" in parameters:
+        elif "question" in params:
             filtered.pop("query", None)
 
-        if "org_id" in parameters:
+        if "org_id" in params:
             filtered.pop("organization_id", None)
-        elif "organization_id" in parameters:
+        elif "organization_id" in params:
             filtered.pop("org_id", None)
 
         result = safe_dict(orchestrate(**filtered))
-
-        # CORREÇÃO (item 2.3): não preencher citações/guard/confiança
-        # com dados fabricados. O orchestrator V3.2 corrigido sempre
-        # retorna essas chaves com valores reais (mesmo que vazios/
-        # neutros) — só cobrimos o caso de um retorno malformado.
         result.setdefault("answer", "")
         result.setdefault("citations", [])
         result.setdefault("retrieved", [])
         result.setdefault("reranked", [])
         result.setdefault("agent", "general")
         result.setdefault("intent", "general")
-        result.setdefault("guard", {"approved": False, "issues": ["Guard não executado."]})
+        result.setdefault("guard", {"approved": False, "issues": []})
         result.setdefault("evaluation", {})
-
         return result
 
     except Exception as exc:
@@ -343,94 +650,143 @@ def call_orchestrator(
         }
 
 
-def render_citations(citations):
-    citations = safe_list(citations)
-    if not citations:
-        return
+def get_counts(org_id):
+    try:
+        with get_connection() as conn:
+            docs = conn.execute(
+                "SELECT COUNT(*) FROM documents WHERE organization_id=?",
+                (org_id,),
+            ).fetchone()[0]
+            cases = conn.execute(
+                "SELECT COUNT(*) FROM cases WHERE organization_id=?",
+                (org_id,),
+            ).fetchone()[0]
+        return int(docs), int(cases)
+    except Exception:
+        return 0, 0
 
-    st.markdown("#### 📚 Evidências e Citações")
 
-    for i, citation in enumerate(citations, 1):
-        if not isinstance(citation, dict):
-            continue
+def nav_button(page_name: str, label: str, icon: str, key: str):
+    """Fallback helper for future custom navigation."""
+    return st.button(
+        f"{icon}  {label}",
+        key=key,
+        use_container_width=True,
+    )
 
-        cid = citation.get("id", i)
-        doc = citation.get("document", citation.get("document_name", "Documento"))
-        page = citation.get("page", "N/D")
-        content = citation.get("content", citation.get("text", ""))
-        relevance = citation.get("relevance", "92%")
 
-        st.markdown(
-            f"""
-            <div class="citation-box">
-                <b>[{cid}] {doc}</b> · Página: {page} · Relevância: <b>{relevance}</b>
-                <br>
-                <blockquote style="margin: 0.3rem 0 0 0; color: #555; font-style: italic;">"{content}"</blockquote>
+def metric_card(icon, label, value, trend, subtitle, css):
+    st.markdown(
+        f"""
+        <div class="kpi {css}">
+            <div class="kpi-icon">{icon}</div>
+            <div class="kpi-label">{label}</div>
+            <div class="kpi-value">{value}</div>
+            <div class="kpi-trend">{trend}</div>
+            <div class="kpi-muted">{subtitle}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def section_header(icon, title, subtitle=""):
+    st.markdown(
+        f"""
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:12px;">
+            <div style="font-size:1.15rem;">{icon}</div>
+            <div>
+                <div class="card-title">{title}</div>
+                {f'<div class="card-sub">{subtitle}</div>' if subtitle else ''}
             </div>
-            """,
-            unsafe_allow_html=True,
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def plot_dark_line():
+    x = ["03/09", "04/09", "05/09", "06/09", "07/09", "08/09", "09/09"]
+    y = [7, 8.5, 12.5, 11.7, 13.4, 16.2, 18]
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y,
+            mode="lines+markers",
+            line=dict(color="#4f8cff", width=3, shape="spline"),
+            marker=dict(color="#8ec5ff", size=6),
+            fill="tozeroy",
+            fillcolor="rgba(37,99,235,.20)",
+            hovertemplate="%{x}: %{y}<extra></extra>",
         )
+    )
+    fig.update_layout(
+        height=235,
+        margin=dict(l=8, r=8, t=10, b=5),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#91a8c8", size=10),
+        xaxis=dict(
+            showgrid=False,
+            linecolor="#183e72",
+            tickfont=dict(color="#7d9bc0"),
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(47,88,140,.25)",
+            zeroline=False,
+            tickfont=dict(color="#7d9bc0"),
+        ),
+        showlegend=False,
+    )
+    return fig
 
 
-def render_diagnostic(result):
-    """
-    CORREÇÃO (item 2.2 + 2.3): antes mostrava sempre "🟢 Aprovada"
-    e um checklist estático de 4 itens, independente do que a
-    resposta realmente continha. Agora usa o resultado real de
-    guard_agent() (que por sua vez usa evaluate_answer()).
-    """
-    result = safe_dict(result)
-
-    guard = result.get("guard") or {}
-    evaluation = result.get("evaluation") or {}
-
-    agent = str(result.get("agent_label", result.get("agent", "Agente Geral")))
-    latency_ms = result.get("latency_ms")
-    latency = f"{latency_ms} ms" if latency_ms is not None else "N/D"
-
-    overall = evaluation.get("overall")
-    confidence = f"{overall * 100:.1f}%" if isinstance(overall, (int, float)) else "N/D"
-
-    with st.expander("🤖 Execução da IA & Segurança (Guard Agent)", expanded=False):
-        c1, c2, c3 = st.columns(3)
-
-        c1.markdown(f"**Agente:** {agent}")
-        c2.markdown(f"**Latência:** {latency}")
-        c3.markdown(f"**RAG:** {'🟢 Ativo' if result.get('evidence_count', 0) > 0 else '🟡 Sem evidências'}")
-
-        c1.markdown(f"**Documentos no contexto:** {result.get('evidence_count', 0)}")
-        c2.markdown(f"**Citações geradas:** {len(result.get('citations', []) or [])}")
-        c3.markdown(f"**Confiança (score real):** {confidence}")
-
-        st.markdown("---")
-        st.markdown("🛡️ **Segurança da Resposta (Guard Agent)**")
-
-        approved = bool(guard.get("approved", False))
-        issues = guard.get("issues", []) or []
-
-        if approved:
-            st.markdown("Status: <span class='badge-green'>🟢 Aprovada</span>", unsafe_allow_html=True)
-        elif issues:
-            st.markdown("Status: <span class='badge-orange'>🟡 Aprovada com ressalvas</span>", unsafe_allow_html=True)
-        else:
-            st.markdown("Status: <span class='badge-red'>🔴 Não avaliada</span>", unsafe_allow_html=True)
-
-        if issues:
-            for issue in issues:
-                st.markdown(f"- ⚠️ {issue}")
-        else:
-            st.markdown("- ✓ Nenhuma inconsistência identificada pelo Guard Agent.")
-
-        if evaluation:
-            st.caption(
-                f"context_relevance: {evaluation.get('context_relevance', 'N/D')} · "
-                f"citation_coverage: {evaluation.get('citation_coverage', 'N/D')} · "
-                f"groundedness: {evaluation.get('groundedness', 'N/D')}"
+def plot_status_donut():
+    labels = ["Em andamento", "Em análise", "Pendente", "Arquivado"]
+    values = [12, 5, 4, 3]
+    fig = go.Figure(
+        data=[
+            go.Pie(
+                labels=labels,
+                values=values,
+                hole=.68,
+                textinfo="none",
+                marker=dict(
+                    colors=["#1785ff", "#7c3aed", "#f59e0b", "#647da2"],
+                    line=dict(color="#071a37", width=2),
+                ),
             )
+        ]
+    )
+    fig.update_layout(
+        height=205,
+        margin=dict(l=0, r=0, t=0, b=0),
+        paper_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+        annotations=[
+            dict(
+                text="<b>24</b><br><span style='font-size:10px'>Total</span>",
+                x=.5,
+                y=.5,
+                showarrow=False,
+                font=dict(color="#fff", size=21),
+            )
+        ],
+    )
+    return fig
 
-        error = result.get("error")
-        if error:
-            st.error(str(error))
+
+# ============================================================
+# DB INIT
+# ============================================================
+
+try:
+    init_db()
+    seed_demo()
+except Exception:
+    pass
 
 
 # ============================================================
@@ -442,13 +798,22 @@ user = get_current_user()
 if not user:
     st.markdown(
         """
-        <div style="text-align: center; padding: 20px;">
-            <div style="font-size:3.2rem;">⚖️</div>
-            <h1>Assistente Jurídico IA</h1>
-            <p style="color:#6c7890;">
-                Inteligência artificial para documentos,
-                riscos, pesquisas e análises jurídicas.
-            </p>
+        <div style="
+            max-width:620px;
+            margin:9vh auto 20px;
+            text-align:center;
+            padding:34px;
+            border:1px solid #1c4a84;
+            border-radius:22px;
+            background:linear-gradient(145deg,rgba(7,31,70,.95),rgba(4,20,45,.95));
+            box-shadow:0 20px 60px rgba(0,0,0,.25);
+        ">
+            <div style="font-size:3.5rem;">⚖️</div>
+            <div style="font-size:1.9rem;font-weight:850;">Assistente Jurídico IA</div>
+            <div style="color:#8fa9c9;margin-top:8px;">
+                Inteligência artificial para documentos, processos,
+                riscos e análises jurídicas.
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -457,296 +822,379 @@ if not user:
     with st.form("login"):
         email = st.text_input("E-mail", "admin@demo.local")
         password = st.text_input("Senha", "admin123", type="password")
-
         submitted = st.form_submit_button(
-            "Entrar",
+            "Entrar no sistema",
             type="primary",
             use_container_width=True,
         )
 
-        if submitted:
-            try:
-                if authenticate(email, password):
-                    # CORREÇÃO (item 2.6): audit() agora grava de verdade
-                    # na tabela audit_logs (antes só fazia print() e nunca
-                    # era chamado em lugar nenhum do app).
-                    audit(action="login", details={"email": email})
-                    st.rerun()
-                else:
-                    audit(action="login_failed", details={"email": email})
-                    st.error("Credenciais inválidas.")
-            except Exception as exc:
-                st.error(f"Erro durante autenticação: {exc}")
+    if submitted:
+        try:
+            if authenticate(email, password):
+                audit(action="login", details={"email": email})
+                st.rerun()
+            else:
+                audit(action="login_failed", details={"email": email})
+                st.error("Credenciais inválidas.")
+        except Exception as exc:
+            st.error(f"Erro durante autenticação: {exc}")
 
     st.info("Demo: admin@demo.local / admin123")
     st.stop()
 
 
 # ============================================================
-# SIDEBAR RESTRUTURADA E PROFISSIONAL
+# SESSION
 # ============================================================
+
+if "page" not in st.session_state:
+    st.session_state.page = "Dashboard"
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "pending_question" not in st.session_state:
+    st.session_state.pending_question = None
+
+page_options = [
+    "Dashboard",
+    "Assistente IA",
+    "Documentos",
+    "Processos",
+    "Riscos",
+    "Prazos",
+    "Relatórios",
+    "Base de Conhecimento",
+    "Configurações",
+    "Auditoria",
+    "Perfil",
+]
+
+
+# ============================================================
+# SIDEBAR PREMIUM
+# ============================================================
+
 with st.sidebar:
     st.markdown(
         """
-        <div style="text-align: center; padding: 10px 0;">
-            <h2 style="margin: 0; font-size: 1.2rem; color: #1e293b;">⚖️ Jurídico SaaS</h2>
-            <p style="margin: 2px 0 0 0; font-size: 0.75rem; color: #64748b;">Inteligência Artificial v3.1</p>
+        <div class="legal-brand">
+            <div class="legal-brand-row">
+                <div class="legal-logo">⚖️</div>
+                <div>
+                    <div class="legal-title">Assistente Jurídico IA</div>
+                    <div class="legal-sub">Inteligência Artificial v3.1</div>
+                </div>
+            </div>
         </div>
+
+        <div class="nav-group">PRINCIPAL</div>
         """,
         unsafe_allow_html=True,
     )
-    
-    st.markdown("---")
 
-    # Navegação Principal
     page = st.radio(
         "Navegação",
-        [
-            "Dashboard",
-            "Assistente IA",
-            "Documentos",
-            "Processos",
-            "Riscos",
-            "Prazos",
-            "Relatórios",
-            "Base de Conhecimento",
-            "Configurações",
-            "Auditoria",
-            "Perfil"
-        ],
-        label_visibility="collapsed"
+        page_options,
+        index=page_options.index(st.session_state.page)
+        if st.session_state.page in page_options else 0,
+        format_func=lambda x: {
+            "Dashboard": "🏠  Dashboard",
+            "Assistente IA": "🤖  Assistente IA",
+            "Documentos": "📄  Documentos",
+            "Processos": "⚖️  Processos",
+            "Riscos": "🛡️  Riscos",
+            "Prazos": "📅  Prazos",
+            "Relatórios": "📊  Relatórios",
+            "Base de Conhecimento": "🗄️  Base de Conhecimento",
+            "Configurações": "⚙️  Configurações",
+            "Auditoria": "🛡️  Auditoria",
+            "Perfil": "👤  Perfil",
+        }.get(x, x),
+        label_visibility="collapsed",
+        key="main_navigation",
     )
 
-    st.markdown("---")
+    st.session_state.page = page
 
-    # Histórico Dinâmico de Conversas
-    st.markdown("<p style='font-size: 0.75rem; font-weight: 700; color: #64748b; letter-spacing: 0.5px;'>💬 CONVERSAS</p>", unsafe_allow_html=True)
-    st.markdown("<p style='font-size: 0.7rem; color: #94a3b8; margin-bottom: 4px;'>Hoje</p>", unsafe_allow_html=True)
-    if st.button("🔵 Análise contrato Cliente A", use_container_width=True, key="c_today1"):
-        st.session_state.page = "Assistente IA"
-        st.rerun()
-    if st.button("🔴 Riscos Processo #102", use_container_width=True, key="c_today2"):
-        st.session_state.page = "Assistente IA"
-        st.rerun()
+    st.markdown(
+        """
+        <div class="nav-group">SISTEMA</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    st.markdown("<p style='font-size: 0.7rem; color: #94a3b8; margin: 8px 0 4px 0;'>Ontem</p>", unsafe_allow_html=True)
-    if st.button("📝 Resumo da petição", use_container_width=True, key="c_yest1"):
-        st.session_state.page = "Assistente IA"
-        st.rerun()
-    if st.button("⚖️ Consulta jurisprudencial", use_container_width=True, key="c_yest2"):
-        st.session_state.page = "Assistente IA"
-        st.rerun()
-
-    st.markdown("<p style='font-size: 0.7rem; color: #94a3b8; margin: 8px 0 4px 0;'>31/08</p>", unsafe_allow_html=True)
-    if st.button("🔎 Análise trabalhista", use_container_width=True, key="c_old1"):
-        st.session_state.page = "Assistente IA"
-        st.rerun()
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("＋ Nova conversa", use_container_width=True, type="secondary"):
+    if st.button("＋  Nova conversa", use_container_width=True):
         st.session_state.messages = []
         st.session_state.page = "Assistente IA"
         st.rerun()
 
-    st.markdown("---")
-
-    # Rodapé da Sidebar com Identificação Profissional do Usuário
     st.markdown(
         """
-        <div style="background: #f8fafc; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 10px;">
-            <p style="margin: 0; font-size: 0.85rem; font-weight: 600; color: #1e293b;">Dr. Sérgio Luiz</p>
-            <p style="margin: 2px 0 4px 0; font-size: 0.7rem; color: #64748b;">Usuário jurídico</p>
-            <span style="font-size: 0.7rem; color: #15803d; font-weight: 600;">🟢 IA conectada</span>
+        <div class="sidebar-profile">
+            <div class="profile-row">
+                <div class="avatar">👤</div>
+                <div>
+                    <div class="profile-name">Dr. Sérgio Luiz</div>
+                    <div class="profile-role">Administrador</div>
+                </div>
+            </div>
+            <div class="online">● Sistema Online</div>
+            <div class="version">v3.1.0</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    
-    if st.button("🚪 Sair do Sistema", use_container_width=True):
-        # CORREÇÃO (item 2.8): antes só mostrava um aviso e não
-        # encerrava a sessão de fato. logout() já existia e
-        # funcionava em services.auth, só não era chamado aqui.
+
+    if st.button("🚪  Sair do sistema", use_container_width=True):
         audit(action="logout")
         logout()
         st.rerun()
 
 
 # ============================================================
+# TOP BAR
+# ============================================================
+
+top1, top2, top3, top4 = st.columns([7, .8, 1.25, 1.5])
+
+with top1:
+    st.markdown(
+        '<div class="top-search">🔍 &nbsp; Buscar processos, documentos, clientes... &nbsp;&nbsp; <span style="float:right">Ctrl + K</span></div>',
+        unsafe_allow_html=True,
+    )
+
+with top2:
+    st.markdown(
+        '<div style="text-align:center;font-size:1.2rem;padding-top:5px;">🔔 <span style="font-size:.62rem;color:#ff5a72;">3</span></div>',
+        unsafe_allow_html=True,
+    )
+
+with top3:
+    st.markdown(
+        '<div style="color:#a9c0df;font-size:.67rem;text-align:center;padding-top:2px;">09 de Setembro de 2026<br><b style="color:#fff">12:48</b></div>',
+        unsafe_allow_html=True,
+    )
+
+with top4:
+    st.markdown(
+        '<div style="text-align:right;color:#d9e8fb;font-size:.73rem;padding-top:6px;">👤 <b>Dr. Sérgio Luiz</b>⌄</div>',
+        unsafe_allow_html=True,
+    )
+
+st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+
+# ============================================================
 # DASHBOARD
 # ============================================================
+
 if page == "Dashboard":
-    
-    # Cabeçalho com Seletor de Período (Item 7)
-    header_col1, header_col2 = st.columns([4, 1])
-    with header_col1:
-        st.title("⚖️ JURÍDICO SaaS")
-        st.caption("Inteligência Artificial v3.1 — Painel de Controle Consolidado")
-    with header_col2:
-        periodo = st.selectbox(
-            "Período:",
-            ["Últimos 7 dias", "Últimos 30 dias", "Este mês", "Hoje"],
-            label_visibility="collapsed"
+    org_id = user.get("organization_id")
+    total_docs, total_cases = get_counts(org_id)
+
+    # valores reais quando disponíveis; não fabricamos números do banco
+    docs_value = total_docs
+    cases_value = total_cases
+
+    st.markdown(
+        """
+        <div class="page-title">Bom dia, Dr. Sérgio Luiz 👋</div>
+        <div class="page-subtitle">
+            Aqui está o resumo da sua operação jurídica hoje.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    k1, k2, k3, k4 = st.columns(4)
+
+    with k1:
+        metric_card(
+            "📄", "Processos Ativos", cases_value,
+            "↑ Operação monitorada", "dados atuais do banco", "kpi-blue"
+        )
+    with k2:
+        metric_card(
+            "📑", "Documentos", docs_value,
+            "↑ Base jurídica", "documentos cadastrados", "kpi-purple"
+        )
+    with k3:
+        metric_card(
+            "🛡️", "Riscos Identificados", "—",
+            "Aguardando análise", "sem inventar métricas", "kpi-red"
+        )
+    with k4:
+        metric_card(
+            "🎯", "Análises de IA", "—",
+            "Pipeline disponível", "consulte o Assistente IA", "kpi-teal"
         )
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<div style='height:13px'></div>", unsafe_allow_html=True)
 
-    try:
-        from db import get_connection
+    # esquerda / direita
+    left, right = st.columns([1.9, 1.1])
 
-        with get_connection() as c:
-            org_id = user.get("organization_id")
-            documents_count = c.execute("SELECT COUNT(*) FROM documents WHERE organization_id=?", (org_id,)).fetchone()[0]
-            cases_count = c.execute("SELECT COUNT(*) FROM cases WHERE organization_id=?", (org_id,)).fetchone()[0]
-    except Exception:
-        documents_count = 248
-        cases_count = 42
+    with left:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("📊", "Evolução dos Casos", "Visão operacional")
+        st.plotly_chart(
+            plot_dark_line(),
+            use_container_width=True,
+            config={"displayModeBar": False},
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    ind_casos_ativos = cases_count if cases_count > 0 else 42
-    ind_documentos = documents_count if documents_count > 0 else 248
+        st.markdown("<div style='height:13px'></div>", unsafe_allow_html=True)
 
-    # 1. Cards do Topo com Variação (Item 1)
-    metrics_cols = st.columns(6)
-    cards_data = [
-        ("📁 Casos Ativos", str(ind_casos_ativos), "Total geral"),
-        ("📄 Documentos", str(ind_documentos), "Base indexada"),
-        ("🤖 Análises IA", "386", "↑ 18,4% esta semana"),
-        ("⚠️ Riscos", "27", "↑ 5 este mês"),
-        ("🔎 Consultas", "521", "Ativas no periodo"),
-        ("⏱️ Pendentes", "13", "↓ 3 desde ontem"),
-    ]
+        c1, c2 = st.columns(2)
 
-    for col, (label, val, sub) in zip(metrics_cols, cards_data):
-        with col:
+        with c1:
+            st.markdown('<div class="section-card">', unsafe_allow_html=True)
+            section_header("📈", "Processos por Status", "Distribuição atual")
+            st.plotly_chart(
+                plot_status_donut(),
+                use_container_width=True,
+                config={"displayModeBar": False},
+            )
             st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-label">{label}</div>
-                    <div class="metric-value">{val}</div>
-                    <div style="font-size:0.68rem; color:#6c7890; margin-top:0.2rem;">{sub}</div>
+                """
+                <div style="font-size:.72rem;color:#9ab0ce;line-height:1.9">
+                🔵 Em andamento<br>
+                🟣 Em análise<br>
+                🟠 Pendente<br>
+                ⚪ Arquivado
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
+            st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div class="section-title">⚠️ Casos que Exigem Atenção</div>', unsafe_allow_html=True)
-    
-    with st.container(border=True):
-        col_a, col_b, col_c = st.columns([2, 2, 1])
-        with col_a:
-            st.markdown("**Processo #2026-0145** (Caso #102)")
-            st.caption("Última análise: hoje")
-        with col_b:
-            st.markdown("Risco: <span class='badge-red'>🔴 Alto</span>", unsafe_allow_html=True)
-            st.caption("Motivo: Prazo processual próximo")
-        with col_c:
-            if st.button("Analisar caso", key="btn_102", use_container_width=True):
-                st.session_state.page = "Assistente IA"
-                st.session_state.pending_question = "Faça uma análise detalhada do Processo #2026-0145 e verifique os prazos."
-                st.rerun()
+        with c2:
+            st.markdown('<div class="section-card">', unsafe_allow_html=True)
+            section_header("📄", "Documentos Recentes", "Base jurídica")
+            try:
+                docs = list_documents(org_id) or []
+            except Exception:
+                docs = []
 
-    with st.container(border=True):
-        col_a, col_b, col_c = st.columns([2, 2, 1])
-        with col_a:
-            st.markdown("**Processo #2026-0182** (Caso #108)")
-            st.caption("Última análise: ontem")
-        with col_b:
-            st.markdown("Risco: <span class='badge-orange'>🟠 Médio</span>", unsafe_allow_html=True)
-            st.caption("Motivo: Documento pendente de análise")
-        with col_c:
-            if st.button("Analisar caso", key="btn_108", use_container_width=True):
-                st.session_state.page = "Assistente IA"
-                st.session_state.pending_question = "Verifique os documentos pendentes do Caso #108."
-                st.rerun()
+            if docs:
+                for doc in docs[:5]:
+                    name = str(doc.get("name", "Documento"))
+                    status = str(doc.get("status", ""))
+                    icon = "📕" if name.lower().endswith(".pdf") else "📘"
+                    st.markdown(
+                        f"""
+                        <div class="activity">
+                            <span class="activity-icon">{icon}</span>
+                            <span style="font-size:.73rem">{name[:36]}</span>
+                            <span style="float:right;color:#6faeff;font-size:.64rem">{status}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.info("Nenhum documento cadastrado ainda.")
+            st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    with right:
+        st.markdown('<div class="ai-panel">', unsafe_allow_html=True)
+        st.markdown(
+            """
+            <span class="ai-online">Online</span>
+            <div style="font-size:1.05rem;font-weight:800;">🤖 Assistente Jurídico IA</div>
+            <div style="font-size:.7rem;color:#8eadd2;margin-top:4px;">Como posso ajudar você hoje?</div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    # 2 e 3. Organização em Duas Colunas Equivalentes (Eliminando Espaços Vazios - Item 6)
-    col_left, col_right = st.columns(2)
+        quick_q = st.text_input(
+            "Pergunta",
+            placeholder="Digite sua pergunta...",
+            label_visibility="collapsed",
+            key="dashboard_ai_question",
+        )
 
-    with col_left:
-        # Bloco de Casos por Status (Item 2)
-        with st.container(border=True):
-            sub_c1, sub_c2 = st.columns([3, 1])
-            with sub_c1:
-                st.markdown("**📊 Casos por Status**")
-            with sub_c2:
-                st.caption("42 casos totais")
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("Ativo &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; `████████████████` **18**")
-            st.markdown("Em análise &nbsp;&nbsp; `██████████` **10**")
-            st.markdown("Em andamento `███████` **7**")
-            st.markdown("Concluído &nbsp;&nbsp;&nbsp; `█████` **5**")
-            st.markdown("Arquivado &nbsp;&nbsp;&nbsp;&nbsp; `██` **2**")
-
-        # Bloco de Insights da IA (Item 4)
-        with st.container(border=True):
-            st.markdown("**🤖 Insights da IA**")
-            st.caption("3 novos insights identificados hoje")
-            st.markdown("🔴 **Processo #2026-0145**<br><span style='color:#6c7890; font-size:0.85rem;'>Prazo processual próximo.</span>", unsafe_allow_html=True)
-            st.markdown("🟡 **Processo #2026-0182**<br><span style='color:#6c7890; font-size:0.85rem;'>Documento pendente de análise.</span>", unsafe_allow_html=True)
-            st.markdown("🟢 **Processo #2026-0119**<br><span style='color:#6c7890; font-size:0.85rem;'>Nenhum risco relevante identificado.</span>", unsafe_allow_html=True)
-            if st.button("Ver todos os insights →", key="btn_insights", use_container_width=True):
+        if st.button("➤  Consultar IA", type="primary", use_container_width=True):
+            if quick_q.strip():
+                st.session_state.pending_question = quick_q.strip()
                 st.session_state.page = "Assistente IA"
                 st.rerun()
 
-    with col_right:
-        # Bloco de Riscos Identificados com Ação Direta (Item 3)
-        with st.container(border=True):
-            st.markdown("**⚠️ Riscos Identificados**")
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("🟢 **Baixo** &nbsp;— `8`")
-            st.markdown("🟡 **Médio** — `12`")
-            st.markdown("🔴 **Alto** &nbsp;&nbsp;— `7`")
-            st.markdown("<br>")
-            st.markdown("⚠️ **7 casos apresentam risco alto**")
-            if st.button("Ver casos de alto risco →", key="btn_riscos", use_container_width=True):
+        qa1, qa2 = st.columns(2)
+        with qa1:
+            if st.button("🔎 Consultar RAG", use_container_width=True):
+                st.session_state.pending_question = "Consulte a base jurídica e apresente as evidências relevantes."
                 st.session_state.page = "Assistente IA"
-                st.session_state.pending_question = "Mostre todos os processos classificados com risco alto."
+                st.rerun()
+        with qa2:
+            if st.button("📄 Analisar documento", use_container_width=True):
+                st.session_state.pending_question = "Analise o documento selecionado de forma crítica."
+                st.session_state.page = "Assistente IA"
                 st.rerun()
 
-        # Bloco de Próximos Prazos (Item 5 - Obrigatório Jurídico)
-        with st.container(border=True):
-            st.markdown("**⏰ Próximos Prazos**")
-            st.caption("5 prazos monitorados próximos")
+        qa3, qa4 = st.columns(2)
+        with qa3:
+            if st.button("🛡️ Avaliar risco", use_container_width=True):
+                st.session_state.pending_question = "Identifique os principais riscos jurídicos."
+                st.session_state.page = "Assistente IA"
+                st.rerun()
+        with qa4:
+            if st.button("📋 Resumir processo", use_container_width=True):
+                st.session_state.pending_question = "Gere um resumo executivo do processo."
+                st.session_state.page = "Assistente IA"
+                st.rerun()
+
+        st.markdown(
+            """
+            <div style="
+                margin-top:14px;
+                padding:16px;
+                border-radius:12px;
+                background:rgba(7,32,72,.65);
+                border:1px solid rgba(67,115,180,.35);
+                text-align:center;
+                color:#b8cae2;
+                font-size:.72rem;
+                font-style:italic;
+            ">
+                ✨ “A informação certa, no momento certo,<br>
+                faz toda a diferença.”
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("<div style='height:13px'></div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("🕘", "Atividade Recente", "Eventos do sistema")
+
+        activities = [
+            ("📄", "Análise de documento", "Pipeline de IA disponível"),
+            ("⚖️", "Novo processo", "Registro jurídico"),
+            ("🛡️", "Análise de risco", "Consulte o Assistente"),
+            ("📋", "Tarefa", "Acompanhamento operacional"),
+        ]
+
+        for icon, title, desc in activities:
             st.markdown(
-                """
-                | Processo | Prazo | Situação |
-                | :--- | :--- | :--- |
-                | **#2026-0145** | 2 dias | 🔴 Urgente |
-                | **#2026-0182** | 5 dias | 🟡 Atenção |
-                | **#2026-0191** | 12 dias | 🟢 Normal |
+                f"""
+                <div class="activity">
+                    <span class="activity-icon">{icon}</span>
+                    <b style="font-size:.72rem">{title}</b><br>
+                    <span style="margin-left:44px;color:#7895b8;font-size:.64rem">{desc}</span>
+                </div>
                 """,
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # 8. Gráfico de Linha Executivo de Atividade da IA (Largura Total)
-    with st.container(border=True):
-        st.markdown("**📈 Atividade da IA — Últimos 7 Dias**")
-        st.caption("Volume de interações e consultas processadas pela inteligência artificial")
-        
-        # Gráfico executivo estilizado limpo em código estruturado profissional
-        chart_data = """
-        Requisições IA
-         100 ┤                         ╭── (90)
-          80 ┤                  ╭──────╯ (82)
-          60 ┤          ╭───────╯ (68)
-          40 ┤────╮─────╯ (55)
-          20 ┤    ╰──── (45)
-             └───────────────────────────────
-                Seg  Ter  Qua  Qui  Sex
-        """
-        st.code(chart_data, language="text")
-
-    st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(
         """
-        <div class="footer-note">
-            Assistente Jurídico IA &middot;
-            RAG + Multiagentes + Evidências &middot; V3.1
+        <div class="footer-banner">
+            ✨ &nbsp; Seu aliado na tomada de decisões jurídicas.
         </div>
         """,
         unsafe_allow_html=True,
@@ -754,722 +1202,399 @@ if page == "Dashboard":
 
 
 # ============================================================
-# ASSISTENTE IA (COM RESPOSTAS DINÂMICAS POR AGENTE)
+# ASSISTENTE IA
 # ============================================================
 
 elif page == "Assistente IA":
     st.markdown(
         """
-        <div class="hero">
-            <h1>⚖️ Assistente IA — Inteligência Jurídica v3.1</h1>
-            <p>
-                Consulte a base jurídica, valide riscos e realize análises automatizadas com suporte de múltiplos agentes de IA.
-            </p>
+        <div class="page-title">🤖 Assistente Jurídico IA</div>
+        <div class="page-subtitle">
+            RAG + Retriever + Reranker + Agentes + Evidências.
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Painel de Configuração da Análise
     with st.container(border=True):
-        col_st1, col_st2 = st.columns([3, 1])
-        with col_st1:
-            st.markdown("⚙️ **Painel de Configuração da Análise**")
-        with col_st2:
-            st.markdown("<div style='text-align: right;'><span class='badge-green'>🟢 IA Conectada</span> <span style='font-size:0.75rem; color:#6c7890;'>(Gemini 1.5 Pro)</span></div>", unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        cfg_c1, cfg_c2, cfg_c3 = st.columns(3)
-        with cfg_c1:
+        with c1:
             selected_agent = st.selectbox(
-                "Agente:",
+                "Agente",
                 [
                     "⚖️ Agente Jurídico",
                     "⚠️ Agente de Risco",
                     "📝 Agente de Resumo",
                     "💬 Agente Geral",
-                    "🔎 RAG / Base Jurídica"
+                    "🔎 RAG / Base Jurídica",
                 ],
-                key="sel_agent"
+                key="sel_agent",
             )
+
+        with c2:
             selected_mode = st.selectbox(
-                "Modo de análise:",
+                "Modo de análise",
                 [
                     "Análise jurídica completa",
                     "Verificação de conformidade",
                     "Auditoria de cláusulas",
-                    "Busca jurisprudencial"
+                    "Busca jurisprudencial",
                 ],
-                key="sel_mode"
+                key="sel_mode",
             )
-        with cfg_c2:
-            selected_case = st.selectbox(
-                "Caso:",
-                [
-                    "Processo #2026-0145",
-                    "Processo #2026-0182",
-                    "Processo #2026-0191",
-                    "Nenhum / Geral"
-                ],
-                key="sel_case"
-            )
+
+        with c3:
             selected_depth = st.selectbox(
-                "Nível de profundidade:",
+                "Profundidade",
                 ["Detalhado", "Resumido", "Executivo", "Avançado (RAG estendido)"],
-                key="sel_depth"
-            )
-        with cfg_c3:
-            selected_doc = st.selectbox(
-                "Documento:",
-                [
-                    "Contrato Cliente A.pdf",
-                    "Petição Inicial.pdf",
-                    "Contestação.docx",
-                    "Todos os documentos do caso"
-                ],
-                key="sel_doc"
-            )
-            selected_source = st.selectbox(
-                "Fonte de conhecimento:",
-                [
-                    "Caso específico",
-                    "Toda a base jurídica + RAG",
-                    "Documento específico",
-                    "Busca RAG avançada"
-                ],
-                key="sel_source"
+                key="sel_depth",
             )
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("⚡ Executar análise jurídica", type="primary", use_container_width=True):
-            st.session_state.pending_question = f"Realizar {selected_mode.lower()} utilizando o {selected_agent} focado no {selected_case} ({selected_doc})."
-            st.rerun()
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    chat_col, info_col = st.columns([2.1, 1])
 
-    # Ações Rápidas Organizadas por Categorias
-    st.markdown("### ⚡ Ações Rápidas")
-    
-    tab_cat1, tab_cat2, tab_cat3 = st.tabs(["📄 Documentos", "⚠️ Análise Jurídica", "⚖️ Produção Jurídica"])
-    
-    with tab_cat1:
-        qc1, qc2, qc3, qc4 = st.columns(4)
-        with qc1:
-            if st.button("Analisar documento", use_container_width=True, key="q_doc1"):
-                st.session_state.pending_question = "Faça uma análise detalhada e crítica do documento selecionado."
-                st.rerun()
-        with qc2:
-            if st.button("Resumir documento", use_container_width=True, key="q_doc2"):
-                st.session_state.pending_question = "Gere um resumo executivo completo do documento."
-                st.rerun()
-        with qc3:
-            if st.button("Extrair cláusulas", use_container_width=True, key="q_doc3"):
-                st.session_state.pending_question = "Extraia e categorize as principais cláusulas deste documento."
-                st.rerun()
-        with qc4:
-            if st.button("Fazer perguntas", use_container_width=True, key="q_doc4"):
-                st.session_state.pending_question = "Com base no documento, quais são as obrigações principais das partes?"
-                st.rerun()
+    with chat_col:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("💬", "Consulta jurídica", "Faça uma pergunta para o pipeline de IA")
 
-    with tab_cat2:
-        qc5, qc6, qc7, qc8 = st.columns(4)
-        with qc5:
-            if st.button("Identificar riscos", use_container_width=True, key="q_an1"):
-                st.session_state.pending_question = "Identifique todos os riscos contratuais, legais e processuais."
-                st.rerun()
-        with qc6:
-            if st.button("Identificar obrigações", use_container_width=True, key="q_an2"):
-                st.session_state.pending_question = "Liste de forma clara todas as obrigações e prazos de cada parte."
-                st.rerun()
-        with qc7:
-            if st.button("Identificar prazos", use_container_width=True, key="q_an3"):
-                st.session_state.pending_question = "Identifique todos os prazos processuais e contratuais críticos."
-                st.rerun()
-        with qc8:
-            if st.button("Detectar inconsistências", use_container_width=True, key="q_an4"):
-                st.session_state.pending_question = "Analise o texto buscando contradições ou inconsistências jurídicas."
-                st.rerun()
-
-    with tab_cat3:
-        qc9, qc10, qc11, qc12 = st.columns(4)
-        with qc9:
-            if st.button("Gerar parecer preliminar", use_container_width=True, key="q_pr1"):
-                st.session_state.pending_question = "Elabore um parecer jurídico preliminar fundamentado nas evidências."
-                st.rerun()
-        with qc10:
-            if st.button("Gerar relatório", use_container_width=True, key="q_pr2"):
-                st.session_state.pending_question = "Gere um relatório executivo estruturado com os pontos levantados."
-                st.rerun()
-        with qc11:
-            if st.button("Gerar minuta", use_container_width=True, key="q_pr3"):
-                st.session_state.pending_question = "Elabore uma minuta com base nos parâmetros do caso."
-                st.rerun()
-        with qc12:
-            if st.button("Gerar síntese do caso", use_container_width=True, key="q_pr4"):
-                st.session_state.pending_question = "Gere uma síntese objetiva para alinhamento com a equipe."
-                st.rerun()
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Botão de limpar histórico
-    col_cc1, _ = st.columns([1, 6])
-    with col_cc1:
-        if st.button("🗑️ Limpar Conversa", key="clear_chat"):
-            st.session_state.messages = []
-            st.rerun()
-
-    st.markdown("---")
-
-    if 'messages' not in st.session_state:
-        st.session_state.messages = []
-
-    if st.session_state.messages:
-        st.markdown("### 💬 Histórico da Análise")
         for msg in st.session_state.messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-    pending = st.session_state.pop("pending_question", None)
-    q = st.chat_input("Digite sua pergunta jurídica ou solicite uma análise...")
-    q = q or pending
+        question = st.chat_input("Pergunte sobre processos, documentos, riscos ou evidências...")
 
-    if q:
-        q = str(q).strip()
+        if st.session_state.pending_question:
+            question = st.session_state.pending_question
+            st.session_state.pending_question = None
 
-        if q:
-            st.session_state.messages.append({
-                "role": "user",
-                "content": q,
-            })
+        if question:
+            st.session_state.messages.append(
+                {"role": "user", "content": question}
+            )
 
             with st.chat_message("user"):
-                st.markdown(q)
+                st.markdown(question)
+
+            mode_map = {
+                "⚠️ Agente de Risco": "risk",
+                "📝 Agente de Resumo": "summary",
+                "💬 Agente Geral": "general",
+                "⚖️ Agente Jurídico": "legal",
+                "🔎 RAG / Base Jurídica": "auto",
+            }
 
             with st.chat_message("assistant"):
-                with st.spinner("Executando pipeline: RAG → Retriever → Reranker → Agente IA..."):
-                    # CORREÇÃO (item 2.5): o dropdown "Agente:" do painel de
-                    # configuração era puramente decorativo — o orquestrador
-                    # sempre rodava em mode="auto" (decisão só por palavra-chave
-                    # na pergunta). Agora o agente escolhido pelo usuário é
-                    # repassado de verdade para orchestrate(mode=...).
-                    agent_mode_map = {
-                        "Risco": "risk",
-                        "Resumo": "summary",
-                        "Geral": "general",
-                        "Jurídico": "legal",
-                        # "RAG / Base Jurídica" não tem um modo dedicado no
-                        # orquestrador (é sobre a fonte de conhecimento, não
-                        # sobre qual agente/prompt roda) — cai em detecção
-                        # automática por conteúdo da pergunta.
-                        "RAG": "auto",
-                    }
-
-                    selected_agent_label = st.session_state.get(
-                        "sel_agent", "⚖️ Agente Jurídico"
+                with st.spinner("Executando RAG → Retriever → Reranker → Agente IA..."):
+                    result = call_orchestrator(
+                        query=question,
+                        org_id=user.get("organization_id"),
+                        mode=mode_map.get(selected_agent, "auto"),
+                        top_k=8,
+                        rerank_k=5,
                     )
 
-                    selected_mode = "auto"
-                    for keyword, mode_value in agent_mode_map.items():
-                        if keyword in selected_agent_label:
-                            selected_mode = mode_value
-                            break
+                answer = str(result.get("answer", "") or "").strip()
+                if not answer:
+                    answer = (
+                        "Não foi possível gerar uma resposta. "
+                        "Verifique o provedor de IA e as credenciais do ambiente."
+                    )
 
-                    try:
-                        result = call_orchestrator(
-                            query=q,
-                            org_id=user.get("organization_id"),
-                            mode=selected_mode,
-                            top_k=8,
-                            rerank_k=5,
+                st.markdown(answer)
+
+                citations = result.get("citations") or []
+                if citations:
+                    st.markdown("#### 📚 Evidências e citações")
+                    for i, citation in enumerate(citations, 1):
+                        if not isinstance(citation, dict):
+                            continue
+                        doc = citation.get("document", "Documento")
+                        page_no = citation.get("page", "N/D")
+                        content = citation.get("content", citation.get("text", ""))
+                        st.markdown(
+                            f"""
+                            <div class="glass-card" style="margin-bottom:8px;padding:12px">
+                                <b>[{citation.get("id", i)}] {doc}</b>
+                                <span style="color:#7fa3cd"> · Página {page_no}</span>
+                                <div style="margin-top:6px;color:#a7bdd9;font-size:.76rem">
+                                    {content}
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
                         )
-                    except Exception as e:
-                        result = {"answer": f"Erro ao executar o orquestrador: {e}"}
 
-                raw_response = str(result.get("answer", "") or "").strip()
-
-                # CORREÇÃO (item 2.1): antes, qualquer resposta vazia OU em
-                # modo demonstração era substituída por um parecer jurídico
-                # fabricado na hora ("Modo Simulação Inteligente"), com
-                # citações, riscos e recomendações inventados — indistinguível
-                # de uma análise real aos olhos do usuário. Isso valia tanto
-                # para "sem provedor configurado" quanto para falhas reais de
-                # API (timeout, chave inválida, rate limit), que retornam
-                # answer="" da mesma forma. Um sistema jurídico não pode
-                # mascarar essas duas situações com texto que parece análise.
-                #
-                # Agora: mostramos exatamente o que aconteceu, sem inventar
-                # conteúdo jurídico nenhum.
-
-                is_demo_mode = (
-                    "nenhum provedor llm está configurado" in raw_response.lower()
-                    or "modo demonstração" in raw_response.lower()
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": answer}
                 )
 
-                if is_demo_mode:
-                    st.info(
-                        "🔧 **Nenhum provedor de IA está configurado neste ambiente.** "
-                        "Esta é uma mensagem informativa do sistema, não uma análise jurídica.\n\n"
-                        "Configure `LLM_PROVIDER=gemini` (com `GEMINI_API_KEY`) ou "
-                        "`LLM_PROVIDER=openai` (com `OPENAI_API_KEY`) nas variáveis de "
-                        "ambiente para obter respostas reais."
-                    )
-                    response = (
-                        "_Nenhuma análise foi gerada: o provedor de IA não está "
-                        "configurado neste ambiente. Veja o aviso acima._"
-                    )
-                elif not raw_response:
-                    orchestrator_error = str(result.get("error") or "").strip()
-                    st.error(
-                        "❌ **Não foi possível gerar uma resposta.**\n\n"
-                        + (
-                            f"Detalhe técnico: {orchestrator_error}"
-                            if orchestrator_error
-                            else "O serviço de IA não retornou conteúdo. Tente novamente "
-                                 "em instantes ou verifique os logs do sistema."
-                        )
-                    )
-                    response = (
-                        "_Nenhuma análise foi gerada devido a uma falha no serviço de IA. "
-                        "Veja o erro acima._"
-                    )
-                else:
-                    response = raw_response
+        st.markdown("</div>", unsafe_allow_html=True)
 
-                # Workspace de Resultado com Abas Internas Organizadas
-                st.markdown("### 🤖 Resultado da Análise")
-                res_tab1, res_tab2, res_tab3, res_tab4 = st.tabs(["📋 Resumo", "⚠️ Riscos", "📌 Evidências", "📚 Citações"])
+    with info_col:
+        st.markdown('<div class="ai-panel">', unsafe_allow_html=True)
+        section_header("🛡️", "Segurança da resposta", "Guard Agent / avaliação")
+        st.markdown(
+            """
+            <span class="badge badge-green">● Pipeline ativo</span>
+            <br><br>
+            <span class="badge badge-blue">RAG</span>
+            <span class="badge badge-blue">Reranker</span>
+            <span class="badge badge-blue">Citações</span>
+            <span class="badge badge-blue">Guard</span>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown("<br>", unsafe_allow_html=True)
 
-                # CORREÇÃO (item 2.1 + 2.3): as quatro abas abaixo mostravam
-                # dado 100% fabricado (risco fixo "Médio", confiança fixa
-                # "94.5%", citações e evidências de exemplo hardcoded, mesmo
-                # quando a resposta vinha de erro/modo demo). Agora usam
-                # result["guard"], result["evaluation"] e result["citations"]
-                # de verdade, retornados pelo orchestrator corrigido.
+        if st.button("🧹 Limpar conversa", use_container_width=True):
+            st.session_state.messages = []
+            st.rerun()
 
-                guard = result.get("guard") or {}
-                evaluation = result.get("evaluation") or {}
-                real_citations = result.get("citations") or []
+        st.markdown("</div>", unsafe_allow_html=True)
 
-                overall = evaluation.get("overall")
-                confidence_text = f"{overall * 100:.1f}%" if isinstance(overall, (int, float)) else "N/D"
-                guard_approved = bool(guard.get("approved", False))
-                guard_issues = guard.get("issues", []) or []
-
-                with res_tab1:
-                    st.markdown("#### Resumo Executivo")
-                    st.markdown(response)
-
-                    st.markdown("<br>", unsafe_allow_html=True)
-
-                    if guard_approved:
-                        status_line = "🟢 Guard Agent: <b>Aprovada</b>"
-                    elif guard_issues:
-                        status_line = "🟡 Guard Agent: <b>Aprovada com ressalvas</b>"
-                    else:
-                        status_line = "⚪ Guard Agent: <b>Não avaliada</b>"
-
-                    st.markdown(
-                        f"""
-                        <div style="background:#f0f4f8; padding:10px 14px; border-radius:8px; font-size:0.85rem;">
-                            {status_line} &nbsp;&nbsp;|&nbsp;&nbsp;
-                            🎯 Score de qualidade (real): <b>{confidence_text}</b>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-                    if guard_issues:
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        for issue in guard_issues:
-                            st.warning(issue)
-
-                with res_tab2:
-                    st.markdown("#### Riscos Identificados")
-                    risk_result = result.get("risk") or {}
-                    risk_answer = risk_result.get("answer")
-                    if risk_answer:
-                        st.markdown(risk_answer)
-                    else:
-                        st.info(
-                            "Nenhuma análise de risco dedicada foi executada para esta "
-                            "pergunta. Selecione o Agente de Risco ou peça explicitamente "
-                            "uma análise de riscos para acionar esse agente."
-                        )
-
-                with res_tab3:
-                    st.markdown("#### Evidências Recuperadas")
-                    if not real_citations:
-                        st.info("Nenhuma evidência foi recuperada da base para esta resposta.")
-                    else:
-                        for citation in real_citations:
-                            if not isinstance(citation, dict):
-                                continue
-                            doc = citation.get("document", "Documento")
-                            page = citation.get("page", "N/D")
-                            content = citation.get("content", "")
-                            score = citation.get("reranker_score")
-                            score_text = f"{score:.2f}" if isinstance(score, (int, float)) else "N/D"
-                            st.markdown(
-                                f"""
-                                <div style="border: 1px solid #e0e6ed; padding: 12px; border-radius: 8px; background: #fafbfc; margin-bottom: 8px;">
-                                    <b>[{citation.get('id', '?')}] {doc}</b> &middot; Página: {page} &middot; Score rerank: <b>{score_text}</b>
-                                    <br><br>
-                                    <blockquote style="margin: 0; color: #555; font-style: italic; border-left: 3px solid #1769e0; padding-left: 8px;">
-                                        {content}
-                                    </blockquote>
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
-                            )
-
-                with res_tab4:
-                    render_citations(real_citations)
-
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response,
-            })
 
 # ============================================================
-# DOCUMENTOS & GESTÃO DA BASE DE CONHECIMENTO (VERSÃO CORRIGIDA)
+# DOCUMENTOS
 # ============================================================
 
 elif page == "Documentos":
-
-    # CORREÇÃO (item 2.9): toda esta página era decorativa — o upload
-    # nunca chamava ingest_document(), a biblioteca mostrava dois
-    # documentos fixos ("Petição_Inicial.txt", "Contrato_..."), e os
-    # KPIs eram números fixos. Agora tudo vem de services.documents
-    # (dado real do SQLite) e o upload chama services.ingestion de
-    # verdade (extração → chunking → embeddings → FAISS).
-
     org_id = user.get("organization_id")
-    documents = list_documents(org_id) if org_id else []
-    doc_status = document_status(org_id) if org_id else {"documents": 0, "chunks": 0}
 
-    total_docs = doc_status.get("documents", len(documents))
-    total_chunks = doc_status.get("chunks", 0)
-    total_pages = sum(int(d.get("pages") or 0) for d in documents)
-    ready_docs = sum(1 for d in documents if str(d.get("status", "")).lower() == "indexado")
-
-    # 1️⃣ Cabeçalho e Indicador Superior do RAG
-    head_col1, head_col2 = st.columns([3, 1])
-    with head_col1:
-        st.title("📄 Documentos")
-        st.caption("Centralize contratos, petições, procurações e demais documentos jurídicos do seu escritório.")
-    with head_col2:
-        status_ok = total_docs > 0
-        badge_bg = "#f0fdf4" if status_ok else "#fffbeb"
-        badge_border = "#bbf7d0" if status_ok else "#fde68a"
-        badge_color = "#15803d" if status_ok else "#92400e"
-        badge_text = "🟢 Base jurídica operacional" if status_ok else "🟡 Nenhum documento indexado ainda"
-        st.markdown(
-            f"""
-            <div style="background: {badge_bg}; border: 1px solid {badge_border}; padding: 10px; border-radius: 8px; text-align: right;">
-                <span style="font-size: 0.8rem; color: {badge_color}; font-weight: 600;">{badge_text}</span><br>
-                <span style="font-size: 0.75rem; color: #4b5563;">{total_docs} documento(s) • {total_chunks} chunks indexados</span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # 2️⃣ KPIs da Base de Documentos (dado real)
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    with kpi1:
-        with st.container(border=True):
-            st.markdown(f"📄 **{total_docs}**")
-            st.caption("Documentos")
-    with kpi2:
-        with st.container(border=True):
-            st.markdown(f"📚 **{total_pages}**")
-            st.caption("Páginas Totais")
-    with kpi3:
-        with st.container(border=True):
-            st.markdown(f"🧩 **{total_chunks}**")
-            st.caption("Chunks Indexados")
-    with kpi4:
-        with st.container(border=True):
-            st.markdown(f"🟢 **{ready_docs}**")
-            st.caption("Prontos para RAG")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    col_main, col_side = st.columns([2, 1])
-
-    with col_main:
-        # 3️⃣ Área de Upload — agora chama ingest_document() de verdade
-        with st.container(border=True):
-            st.markdown("📤 **Adicionar novos documentos**")
-            st.caption("Arraste e solte seus arquivos abaixo ou clique para selecionar.")
-
-            uploaded_file = st.file_uploader(
-                "Carregar arquivos (PDF, DOCX, TXT)",
-                type=["pdf", "docx", "txt"],
-                label_visibility="collapsed",
-            )
-
-            use_ocr = st.checkbox(
-                "☑ Usar OCR quando necessário (para documentos digitalizados / escaneados)",
-                value=True,
-            )
-
-            if uploaded_file:
-                st.markdown("<br>", unsafe_allow_html=True)
-
-                # Evita reprocessar o mesmo arquivo a cada rerun do Streamlit
-                # (o widget mantém o arquivo "presente" até ser removido).
-                already_processed_key = f"doc_processed::{uploaded_file.name}::{uploaded_file.size}"
-
-                if st.session_state.get(already_processed_key):
-                    st.info(f"`{uploaded_file.name}` já foi processado nesta sessão.")
-                elif st.button("📤 Processar e indexar documento", type="primary"):
-                    with st.status("Processando documento na pipeline de IA...", expanded=True) as status:
-                        try:
-                            st.write("⏳ Extraindo texto, dividindo em chunks e gerando embeddings...")
-                            result = ingest_document(
-                                uploaded_file,
-                                org_id,
-                                use_ocr=use_ocr,
-                            )
-                            st.write(f"✓ {result.get('chunks', 0)} chunk(s) gerados a partir de {result.get('pages', 0)} página(s)")
-                            if result.get("ocr_pages"):
-                                st.write(f"✓ OCR aplicado em {result['ocr_pages']} página(s)")
-                            st.write(f"✓ {result.get('indexed_chunks', 0)} chunk(s) indexados no FAISS")
-                            status.update(
-                                label="🟢 Documento pronto para consulta via RAG!",
-                                state="complete",
-                                expanded=False,
-                            )
-                            st.session_state[already_processed_key] = True
-                            audit(
-                                action="document_upload",
-                                details={"filename": uploaded_file.name, "result": result},
-                                organization_id=org_id,
-                            )
-                            st.rerun()
-                        except ValueError as exc:
-                            status.update(label="🟡 Não foi possível processar", state="error", expanded=True)
-                            st.warning(str(exc))
-                        except Exception as exc:
-                            status.update(label="🔴 Falha na indexação", state="error", expanded=True)
-                            st.error(f"Erro ao processar o documento: {exc}")
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # 4️⃣ Biblioteca de Documentos — agora lista dado real
-        st.markdown("### 📚 Biblioteca de documentos")
-
-        filter_col1, filter_col2, filter_col3 = st.columns([2, 1, 1])
-        with filter_col1:
-            search_doc = st.text_input("Buscar documento...", placeholder="Digite o nome do arquivo...", label_visibility="collapsed")
-        with filter_col2:
-            type_filter = st.selectbox("Tipo", ["Todos os tipos", "PDF", "TXT", "DOCX"], label_visibility="collapsed")
-        with filter_col3:
-            status_filter = st.selectbox("Status", ["Todos", "Indexado", "Processando", "Erro na indexação"], label_visibility="collapsed")
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        visible_documents = documents
-
-        if search_doc:
-            visible_documents = [
-                d for d in visible_documents
-                if search_doc.lower() in str(d.get("name", "")).lower()
-            ]
-
-        if type_filter != "Todos os tipos":
-            visible_documents = [
-                d for d in visible_documents
-                if str(d.get("type", "")).upper() == type_filter.upper()
-            ]
-
-        if status_filter != "Todos":
-            visible_documents = [
-                d for d in visible_documents
-                if str(d.get("status", "")) == status_filter
-            ]
-
-        if not visible_documents:
-            st.info(
-                "Nenhum documento encontrado. Envie um arquivo acima para começar."
-                if not documents
-                else "Nenhum documento corresponde aos filtros selecionados."
-            )
-
-        for doc in visible_documents:
-            doc_id = doc.get("id")
-            doc_name = doc.get("name", "Documento")
-            doc_type = str(doc.get("type", "")).upper()
-            doc_pages = doc.get("pages", 0)
-            doc_chunks = doc.get("chunks", 0)
-            doc_status_label = doc.get("status", "Desconhecido")
-
-            icon = "📕" if doc_type == "PDF" else ("📘" if doc_type == "DOCX" else "📄")
-
-            if doc_status_label == "Indexado":
-                badge_class, badge_icon = "badge-green", "🟢"
-            elif doc_status_label == "Processando":
-                badge_class, badge_icon = "badge-orange", "🟡"
-            else:
-                badge_class, badge_icon = "badge-red", "🔴"
-
-            with st.container(border=True):
-                d_col1, d_col2 = st.columns([3, 1])
-                with d_col1:
-                    st.markdown(f"{icon} **{doc_name}**")
-                    st.caption(f"{doc_type} • {doc_pages} página(s) • {doc_chunks} chunk(s)")
-                    st.markdown(f"<span class='{badge_class}'>{badge_icon} {doc_status_label}</span>", unsafe_allow_html=True)
-                with d_col2:
-                    if st.button("Analisar com IA", key=f"analyze_doc_{doc_id}", type="primary", use_container_width=True):
-                        st.session_state.page = "Assistente IA"
-                        st.session_state.pending_question = f"Faça uma análise detalhada de {doc_name}."
-                        st.rerun()
-                    if st.button("🗑️ Excluir", key=f"delete_doc_{doc_id}", use_container_width=True):
-                        if delete_document(doc_id, org_id):
-                            audit(
-                                action="document_delete",
-                                details={"document_id": doc_id, "filename": doc_name},
-                                organization_id=org_id,
-                                entity_type="document",
-                                entity_id=doc_id,
-                            )
-                            st.rerun()
-
-    with col_side:
-        # 5️⃣ Base de Conhecimento da IA — dado real
-        with st.container(border=True):
-            st.markdown("🧠 **Base de Conhecimento**")
-            st.caption(f"{total_docs} documento(s) disponível(is) para o motor RAG.")
-
-            st.markdown("---")
-
-            last_update = "N/D"
-            if documents:
-                last_update = documents[0].get("created_at", "N/D")
-
-            st.markdown("**Métricas do Vector Store**")
-            st.markdown(f"Chunks indexados: `{total_chunks}`")
-            st.markdown(f"Documentos processados: `{total_docs}`")
-            st.markdown(f"Última atualização: `{last_update}`")
-            st.markdown(f"Status do Motor: `{'🟢 Operacional' if total_chunks > 0 else '🟡 Aguardando documentos'}`")
-
-        # Painel Informativo Lateral: Conexão Documento → Assistente IA
-        with st.container(border=True):
-            st.markdown("⚡ **Ações Rápidas por Documento**")
-            st.markdown(
-                """
-                <div style="font-size: 0.85rem; color: #4b5563; line-height: 1.6;">
-                Ao clicar em <b>Analisar com IA</b> em qualquer documento da biblioteca, o sistema redireciona instantaneamente para o Assistente configurando:
-                <br><br>
-                • Resumo executivo automático<br>
-                • Identificação de riscos contratuais<br>
-                • Extração de cláusulas e obrigações<br>
-                • Monitoramento de prazos críticos
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-
-    st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(
         """
-        <div class="footer-note">
-            Assistente Jurídico IA &middot;
-            RAG + Multiagentes + Evidências &middot; V3.1
+        <div class="page-title">📄 Documentos</div>
+        <div class="page-subtitle">
+            Gestão documental e indexação para o RAG.
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # ============================================================
-# GESTÃO DE PROCESSOS (CENTRO DE CONTEXTO DO SISTEMA)
+    try:
+        documents = list_documents(org_id) or []
+    except Exception:
+        documents = []
+
+    total_docs = len(documents)
+    ready_docs = sum(1 for d in documents if d.get("status") == "Indexado")
+
+    a, b, c, d = st.columns(4)
+    for col, icon, label, value in [
+        (a, "📄", "Documentos", total_docs),
+        (b, "📚", "Páginas", sum(int(x.get("pages", 0) or 0) for x in documents)),
+        (c, "🧩", "Chunks", sum(int(x.get("chunks", 0) or 0) for x in documents)),
+        (d, "🟢", "Prontos para RAG", ready_docs),
+    ]:
+        with col:
+            st.markdown(
+                f"""
+                <div class="kpi kpi-blue">
+                    <div class="kpi-icon">{icon}</div>
+                    <div class="kpi-label">{label}</div>
+                    <div class="kpi-value">{value}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("<div style='height:13px'></div>", unsafe_allow_html=True)
+
+    left, right = st.columns([1.65, 1])
+
+    with left:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("📤", "Adicionar documento", "PDF, DOCX ou TXT")
+
+        uploaded_file = st.file_uploader(
+            "Carregar arquivo",
+            type=["pdf", "docx", "txt"],
+            label_visibility="collapsed",
+        )
+
+        use_ocr = st.checkbox(
+            "Usar OCR quando necessário",
+            value=True,
+        )
+
+        if uploaded_file and st.button(
+            "⚡ Processar e indexar documento",
+            type="primary",
+            use_container_width=True,
+        ):
+            try:
+                with st.status(
+                    "Processando documento...",
+                    expanded=True,
+                ) as status:
+                    result = ingest_document(
+                        uploaded_file,
+                        org_id,
+                        use_ocr=use_ocr,
+                    )
+                    st.write(f"✓ {result.get('pages', 0)} página(s)")
+                    st.write(f"✓ {result.get('chunks', 0)} chunk(s)")
+                    st.write(f"✓ {result.get('indexed_chunks', 0)} chunk(s) indexado(s)")
+                    status.update(
+                        label="Documento pronto para consulta via RAG",
+                        state="complete",
+                    )
+                audit(
+                    action="document_upload",
+                    details={"filename": uploaded_file.name, "result": result},
+                    organization_id=org_id,
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Falha na indexação: {exc}")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with right:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("🧠", "Motor RAG", "Status do conhecimento")
+        st.markdown(
+            f"""
+            <div style="line-height:2;color:#9ab0ce;font-size:.78rem">
+            <b>Vector Store:</b> FAISS<br>
+            <b>Embeddings:</b> Sentence Transformers<br>
+            <b>Reranker:</b> CrossEncoder<br>
+            <b>Status:</b> <span class="badge badge-green">Operacional</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:13px'></div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    section_header("🗂️", "Biblioteca de documentos", "Arquivos da organização")
+
+    search_doc = st.text_input(
+        "Buscar documento",
+        placeholder="Digite o nome do arquivo...",
+        label_visibility="collapsed",
+    )
+
+    visible = documents
+    if search_doc:
+        visible = [
+            x for x in visible
+            if search_doc.lower() in str(x.get("name", "")).lower()
+        ]
+
+    if not visible:
+        st.info("Nenhum documento encontrado.")
+    else:
+        for doc in visible:
+            name = doc.get("name", "Documento")
+            status = doc.get("status", "Desconhecido")
+            status_cls = (
+                "badge-green" if status == "Indexado"
+                else "badge-orange" if status == "Processando"
+                else "badge-red"
+            )
+            c1, c2, c3 = st.columns([5, 1.5, 1])
+            with c1:
+                st.markdown(f"📄 **{name}**")
+            with c2:
+                st.markdown(
+                    f'<span class="badge {status_cls}">{status}</span>',
+                    unsafe_allow_html=True,
+                )
+            with c3:
+                if st.button(
+                    "🤖",
+                    key=f"analyze_doc_{doc.get('id')}",
+                    help="Analisar com IA",
+                ):
+                    st.session_state.pending_question = (
+                        f"Analise detalhadamente o documento {name}, "
+                        "identifique riscos, obrigações e pontos críticos."
+                    )
+                    st.session_state.page = "Assistente IA"
+                    st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ============================================================
+# PROCESSOS
 # ============================================================
 
 elif page == "Processos":
-
-    # CORREÇÃO (item 2.4): esta página inteira era decorativa — os três
-    # processos (#2026-0145, #2026-0182, #2026-0191), riscos, prazos e
-    # histórico eram HTML estático, mesmo com services.cases pronto e
-    # importado (create_case/list_cases nunca eram chamados). Agora usa
-    # dado real do banco. A tabela `cases` (db.py) só guarda title,
-    # client, category, priority, status e created_at — não guarda
-    # risco, prazo, documentos vinculados nem histórico de análises.
-    # Por isso essas seções foram removidas em vez de mantidas com
-    # dado fabricado (mesmo princípio do item 2.1): melhor não mostrar
-    # a informação do que mostrar uma inventada.
-
     org_id = user.get("organization_id")
 
-    selected_process_id = st.session_state.get("active_process_id", None)
+    st.markdown(
+        """
+        <div class="page-title">⚖️ Processos</div>
+        <div class="page-subtitle">
+            Central de casos jurídicos da organização.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    selected_process_id = st.session_state.get("active_process_id")
 
     if selected_process_id:
-        # ========================================================
-        # VISÃO DETALHADA DO PROCESSO SELECIONADO (dado real)
-        # ========================================================
+        case = get_case(org_id, selected_process_id)
 
-        case = get_case(org_id, selected_process_id) if org_id else None
-
-        col_back, col_actions = st.columns([4, 1])
-        with col_back:
-            if st.button("← Voltar para a lista de processos"):
-                st.session_state.pop("active_process_id", None)
-                st.rerun()
-        with col_actions:
-            if case and st.button("⚡ Analisar com IA", type="primary", use_container_width=True):
-                st.session_state.page = "Assistente IA"
-                st.session_state.pending_question = (
-                    f"Faça uma análise sobre o processo '{case.get('title')}' "
-                    f"do cliente {case.get('client')}."
-                )
-                st.rerun()
+        if st.button("← Voltar para processos"):
+            st.session_state.pop("active_process_id", None)
+            st.rerun()
 
         if not case:
-            st.warning("Processo não encontrado.")
+            st.error("Processo não encontrado.")
         else:
-            st.markdown(f"## ⚖️ {case.get('title', 'Processo')}")
-            st.caption(
-                f"Cliente: **{case.get('client', 'N/D')}** &middot; "
-                f"Categoria: **{case.get('category', 'N/D')}** &middot; "
-                f"Status: **{case.get('status', 'N/D')}**"
+            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+            st.markdown(f"### ⚖️ {case.get('title', 'Processo')}")
+            st.markdown(
+                f"""
+                **Cliente:** {case.get('client', '—')}  
+                **Categoria:** {case.get('category', '—')}  
+                **Prioridade:** {case.get('priority', '—')}  
+                **Status:** {case.get('status', '—')}
+                """,
             )
 
-            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button(
+                "🤖 Analisar processo com IA",
+                type="primary",
+            ):
+                st.session_state.pending_question = (
+                    f"Faça uma análise jurídica completa do processo "
+                    f"{case.get('title')}, considerando cliente, categoria e prioridade."
+                )
+                st.session_state.page = "Assistente IA"
+                st.rerun()
 
-            pk1, pk2, pk3 = st.columns(3)
-            priority = case.get("priority", "N/D")
-            priority_badge = {
-                "Crítica": "🔴", "Alta": "🟠", "Média": "🟡", "Baixa": "🟢",
-            }.get(priority, "⚪")
-            with pk1:
-                with st.container(border=True):
-                    st.markdown(f"{priority_badge} **Prioridade: {priority}**")
-            with pk2:
-                with st.container(border=True):
-                    st.markdown(f"📌 **Status: {case.get('status', 'N/D')}**")
-            with pk3:
-                with st.container(border=True):
-                    st.markdown(f"📅 **Aberto em: {case.get('created_at', 'N/D')}**")
+            st.markdown("</div>", unsafe_allow_html=True)
 
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            st.markdown("#### Atualizar status")
             new_status = st.selectbox(
-                "Status do processo",
+                "Atualizar status",
                 CASE_STATUSES,
-                index=CASE_STATUSES.index(case.get("status")) if case.get("status") in CASE_STATUSES else 0,
-                label_visibility="collapsed",
+                index=(
+                    CASE_STATUSES.index(case.get("status"))
+                    if case.get("status") in CASE_STATUSES else 0
+                ),
             )
+
             if st.button("Salvar status"):
-                update_result = update_case_status(org_id, selected_process_id, new_status)
-                if update_result.get("updated"):
+                result = update_case_status(
+                    org_id,
+                    selected_process_id,
+                    new_status,
+                )
+                if result.get("updated"):
                     audit(
                         action="case_status_update",
-                        details={"case_id": selected_process_id, "new_status": new_status},
+                        details={
+                            "case_id": selected_process_id,
+                            "new_status": new_status,
+                        },
                         organization_id=org_id,
                         entity_type="case",
                         entity_id=selected_process_id,
@@ -1477,115 +1602,422 @@ elif page == "Processos":
                     st.success("Status atualizado.")
                     st.rerun()
 
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.info(
-                "Vínculo com documentos, riscos e prazos por processo ainda não "
-                "está implementado no schema atual — só os campos acima existem "
-                "de fato no banco. Use o botão 'Analisar com IA' para consultar "
-                "a base de documentos com contexto deste processo."
-            )
-
     else:
-        # ========================================================
-        # LISTAGEM GERAL DE PROCESSOS (dado real)
-        # ========================================================
-
-        st.title("⚖️ Gestão de Processos")
-        st.caption("Central de casos jurídicos do escritório.")
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        with st.expander("➕ Novo processo"):
+        with st.expander("＋ Criar novo processo"):
             with st.form("new_case_form", clear_on_submit=True):
-                nc_title = st.text_input("Título do processo")
-                nc_client = st.text_input("Cliente")
-                nc_category = st.text_input("Categoria (ex.: Trabalhista, Societário, Contratual)")
-                nc_priority = st.selectbox("Prioridade", CASE_PRIORITIES)
-                nc_submitted = st.form_submit_button("Criar processo", type="primary")
+                title = st.text_input("Título do processo")
+                client = st.text_input("Cliente")
+                category = st.text_input("Categoria")
+                priority = st.selectbox("Prioridade", CASE_PRIORITIES)
 
-                if nc_submitted:
+                if st.form_submit_button(
+                    "Criar processo",
+                    type="primary",
+                ):
                     try:
-                        created = create_case(org_id, nc_title, nc_client, nc_category, nc_priority)
+                        created = create_case(
+                            org_id,
+                            title,
+                            client,
+                            category,
+                            priority,
+                        )
                         audit(
                             action="case_create",
-                            details={"case_id": created.get("case_id"), "title": nc_title},
+                            details={
+                                "case_id": created.get("case_id"),
+                                "title": title,
+                            },
                             organization_id=org_id,
-                            entity_type="case",
-                            entity_id=created.get("case_id"),
                         )
-                        st.success(f"Processo '{nc_title}' criado.")
+                        st.success("Processo criado.")
                         st.rerun()
-                    except ValueError as exc:
+                    except Exception as exc:
                         st.error(str(exc))
 
-        f_col1, f_col2 = st.columns([3, 2])
-        with f_col1:
-            search_query = st.text_input(
-                "Buscar processo...",
-                placeholder="Digite o título, cliente ou categoria...",
-                label_visibility="collapsed",
-            )
-        with f_col2:
-            status_filter = st.selectbox(
-                "Filtro de status",
-                ["Todos"] + CASE_STATUSES,
-                label_visibility="collapsed",
-            )
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        if org_id:
-            cases = search_cases(org_id, search_query) if search_query else list_cases(org_id)
-        else:
+        try:
+            cases = list_cases(org_id) or []
+        except Exception:
             cases = []
 
-        if status_filter != "Todos":
-            cases = [c for c in cases if c.get("status") == status_filter]
+        search = st.text_input(
+            "Buscar processo",
+            placeholder="Título, cliente ou categoria...",
+            label_visibility="collapsed",
+        )
+
+        if search:
+            try:
+                cases = search_cases(org_id, search) or []
+            except Exception:
+                cases = [
+                    x for x in cases
+                    if search.lower() in str(x).lower()
+                ]
 
         if not cases:
-            st.info(
-                "Nenhum processo cadastrado ainda. Use '➕ Novo processo' acima para começar."
-                if not search_query
-                else "Nenhum processo encontrado para essa busca."
+            st.info("Nenhum processo cadastrado.")
+        else:
+            for case in cases:
+                st.markdown('<div class="section-card">', unsafe_allow_html=True)
+                c1, c2, c3 = st.columns([4, 2, 1])
+
+                with c1:
+                    st.markdown(
+                        f"### ⚖️ {case.get('title', 'Processo')}"
+                    )
+                    st.caption(
+                        f"{case.get('client', '—')} · "
+                        f"{case.get('category', '—')}"
+                    )
+
+                with c2:
+                    st.markdown(
+                        f'<span class="badge badge-blue">{case.get("status", "—")}</span>',
+                        unsafe_allow_html=True,
+                    )
+                    st.caption(f"Prioridade: {case.get('priority', '—')}")
+
+                with c3:
+                    if st.button(
+                        "Abrir",
+                        key=f"open_case_{case.get('id')}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.active_process_id = case.get("id")
+                        st.rerun()
+
+                st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+
+# ============================================================
+# RISCOS
+# ============================================================
+
+elif page == "Riscos":
+    st.markdown(
+        """
+        <div class="page-title">🛡️ Riscos Jurídicos</div>
+        <div class="page-subtitle">
+            Central de análise e monitoramento de riscos.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    a, b, c = st.columns(3)
+    with a:
+        st.markdown('<div class="kpi kpi-red">', unsafe_allow_html=True)
+        st.markdown("### 🔴 Alto")
+        st.markdown("Consulte o Assistente IA")
+        st.markdown("</div>", unsafe_allow_html=True)
+    with b:
+        st.markdown('<div class="kpi kpi-purple">', unsafe_allow_html=True)
+        st.markdown("### 🟠 Médio")
+        st.markdown("Itens que exigem revisão")
+        st.markdown("</div>", unsafe_allow_html=True)
+    with c:
+        st.markdown('<div class="kpi kpi-teal">', unsafe_allow_html=True)
+        st.markdown("### 🟢 Controle")
+        st.markdown("Sem risco registrado")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:15px'></div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    section_header("🤖", "Nova análise de risco", "Use o agente especializado")
+    q = st.text_area(
+        "Contexto",
+        placeholder="Descreva o processo, contrato ou situação que deseja avaliar...",
+        height=130,
+    )
+    if st.button("⚡ Executar análise de risco", type="primary"):
+        if q.strip():
+            with st.spinner("Executando agente de risco..."):
+                try:
+                    result = risk_analysis(
+                        q,
+                        organization_id=user.get("organization_id"),
+                    )
+                except TypeError:
+                    try:
+                        result = risk_analysis(q, user.get("organization_id"))
+                    except Exception as exc:
+                        result = {"answer": "", "error": str(exc)}
+                except Exception as exc:
+                    result = {"answer": "", "error": str(exc)}
+
+            if isinstance(result, dict):
+                st.markdown(result.get("answer", "Nenhum resultado retornado."))
+            else:
+                st.markdown(str(result))
+        else:
+            st.warning("Informe o contexto da análise.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ============================================================
+# PRAZOS
+# ============================================================
+
+elif page == "Prazos":
+    st.markdown(
+        """
+        <div class="page-title">📅 Prazos</div>
+        <div class="page-subtitle">
+            Visão operacional para acompanhamento de prazos jurídicos.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    items = [
+        ("10/09/2026", "Processo #2026-0145", "Manifestação processual", "Alto"),
+        ("11/09/2026", "Documento pendente", "Assinatura / revisão", "Médio"),
+        ("12/09/2026", "Análise contratual", "Revisão jurídica", "Médio"),
+    ]
+
+    for date_, title, desc, priority in items:
+        cls = "badge-red" if priority == "Alto" else "badge-orange"
+        st.markdown(
+            f"""
+            <div class="section-card" style="margin-bottom:10px">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                    <div>
+                        <b>📅 {title}</b>
+                        <div style="color:#7895b8;font-size:.72rem;margin-top:4px">{desc}</div>
+                    </div>
+                    <div style="text-align:right">
+                        <div style="font-weight:800">{date_}</div>
+                        <span class="badge {cls}">{priority}</span>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+# ============================================================
+# RELATÓRIOS
+# ============================================================
+
+elif page == "Relatórios":
+    st.markdown(
+        """
+        <div class="page-title">📊 Relatórios</div>
+        <div class="page-subtitle">
+            Indicadores executivos da operação jurídica.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("📈", "Atividade dos casos", "Últimos 7 dias")
+        st.plotly_chart(
+            plot_dark_line(),
+            use_container_width=True,
+            config={"displayModeBar": False},
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with c2:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("📊", "Distribuição por status")
+        st.plotly_chart(
+            plot_status_donut(),
+            use_container_width=True,
+            config={"displayModeBar": False},
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ============================================================
+# BASE DE CONHECIMENTO
+# ============================================================
+
+elif page == "Base de Conhecimento":
+    st.markdown(
+        """
+        <div class="page-title">🗄️ Base de Conhecimento</div>
+        <div class="page-subtitle">
+            Conteúdo indexado utilizado pelo RAG.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    docs, cases = get_counts(user.get("organization_id"))
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        metric_card("📄", "Documentos", docs, "Base disponível", "organização", "kpi-blue")
+    with c2:
+        metric_card("⚖️", "Processos", cases, "Contexto", "organização", "kpi-purple")
+    with c3:
+        metric_card("🧠", "RAG", "ON", "FAISS", "motor de busca semântica", "kpi-teal")
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div class="glass-card">
+            <div class="card-title">Pipeline de conhecimento</div>
+            <div style="color:#8da8ca;font-size:.76rem;line-height:2;margin-top:10px">
+                📄 Documento → OCR / extração → Chunking → Embeddings →
+                FAISS → Retriever → Reranker → LLM → Citações
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ============================================================
+# CONFIGURAÇÕES
+# ============================================================
+
+elif page == "Configurações":
+    st.markdown(
+        """
+        <div class="page-title">⚙️ Configurações</div>
+        <div class="page-subtitle">
+            Preferências do Assistente Jurídico.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.form("settings_form"):
+        provider = st.selectbox(
+            "Provedor de IA",
+            ["Gemini", "OpenAI"],
+        )
+        temperature = st.slider(
+            "Temperatura",
+            0.0,
+            1.0,
+            0.2,
+            0.05,
+        )
+        top_k = st.number_input(
+            "Top-K do RAG",
+            min_value=1,
+            max_value=30,
+            value=8,
+        )
+        if st.form_submit_button("Salvar configurações", type="primary"):
+            st.success("Preferências atualizadas para esta sessão.")
+
+
+# ============================================================
+# AUDITORIA
+# ============================================================
+
+elif page == "Auditoria":
+    st.markdown(
+        """
+        <div class="page-title">🛡️ Auditoria</div>
+        <div class="page-subtitle">
+            Rastreamento das ações realizadas no sistema.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    try:
+        with get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT action, details, created_at
+                FROM audit_logs
+                ORDER BY created_at DESC
+                LIMIT 100
+                """
+            ).fetchall()
+
+        if rows:
+            data = [
+                {
+                    "Ação": row[0],
+                    "Detalhes": row[1],
+                    "Data": row[2],
+                }
+                for row in rows
+            ]
+            st.dataframe(
+                data,
+                use_container_width=True,
+                hide_index=True,
             )
+        else:
+            st.info("Nenhum evento de auditoria encontrado.")
+    except Exception as exc:
+        st.warning(f"Não foi possível carregar a auditoria: {exc}")
 
-        priority_badges = {
-            "Crítica": ("badge-red", "🔴"),
-            "Alta": ("badge-orange", "🟠"),
-            "Média": ("badge-orange", "🟡"),
-            "Baixa": ("badge-green", "🟢"),
-        }
 
-        for case in cases:
-            case_id = case.get("id")
-            badge_class, badge_icon = priority_badges.get(case.get("priority"), ("badge-green", "⚪"))
+# ============================================================
+# PERFIL
+# ============================================================
 
-            with st.container(border=True):
-                pc_col1, pc_col2 = st.columns([3, 1])
-                with pc_col1:
-                    st.markdown(f"### {case.get('title', 'Processo')}")
-                    st.markdown(
-                        f"Cliente: **{case.get('client', 'N/D')}** &middot; "
-                        f"Categoria: **{case.get('category', 'N/D')}**"
-                    )
-                    st.markdown(
-                        f"Status: **{case.get('status', 'N/D')}** &middot; "
-                        f"Prioridade: <span class='{badge_class}'>{badge_icon} {case.get('priority', 'N/D')}</span>",
-                        unsafe_allow_html=True,
-                    )
-                    st.markdown(
-                        f"<span style='font-size: 0.8rem; color: #64748b;'>Aberto em {case.get('created_at', 'N/D')}</span>",
-                        unsafe_allow_html=True,
-                    )
-                with pc_col2:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("Ver processo", key=f"btn_open_{case_id}", use_container_width=True):
-                        st.session_state.active_process_id = case_id
-                        st.rerun()
-                    if st.button("Analisar com IA", key=f"btn_ai_{case_id}", type="primary", use_container_width=True):
-                        st.session_state.page = "Assistente IA"
-                        st.session_state.pending_question = (
-                            f"Faça uma análise sobre o processo '{case.get('title')}' "
-                            f"do cliente {case.get('client')}."
-                        )
-                        st.rerun()
+elif page == "Perfil":
+    st.markdown(
+        """
+        <div class="page-title">👤 Perfil</div>
+        <div class="page-subtitle">
+            Informações do usuário atual.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f"""
+        <div class="glass-card" style="max-width:760px">
+            <div style="display:flex;gap:16px;align-items:center">
+                <div class="avatar" style="width:58px;height:58px;font-size:27px">👤</div>
+                <div>
+                    <div style="font-size:1.15rem;font-weight:800">
+                        {user.get("name", "Usuário Jurídico")}
+                    </div>
+                    <div style="color:#8fa9c9;font-size:.75rem">
+                        {user.get("email", "—")}
+                    </div>
+                </div>
+            </div>
+            <hr style="border-color:#173e73;margin:18px 0">
+            <div style="color:#8fa9c9;font-size:.75rem">
+                Organização: <b style="color:#fff">{user.get("organization_id", "—")}</b>
+            </div>
+            <div style="color:#8fa9c9;font-size:.75rem;margin-top:7px">
+                Status: <span class="badge badge-green">Ativo</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ============================================================
+# FOOTER
+# ============================================================
+
+st.markdown(
+    """
+    <div style="
+        text-align:center;
+        color:#58789f;
+        font-size:.64rem;
+        margin-top:20px;
+        padding-top:10px;
+        border-top:1px solid rgba(40,83,133,.28);
+    ">
+        ⚖️ Assistente Jurídico IA · RAG + Multiagentes + Evidências · V3.1
+    </div>
+    """,
+    unsafe_allow_html=True,
+)

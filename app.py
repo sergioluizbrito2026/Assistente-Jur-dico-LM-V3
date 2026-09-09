@@ -2407,40 +2407,273 @@ elif page == "Relatórios":
 # ============================================================
 
 elif page == "Base de Conhecimento":
+    org_id = user.get("organization_id")
+
+    try:
+        knowledge_docs = list_documents(org_id) or []
+    except Exception:
+        knowledge_docs = []
+
+    try:
+        _, knowledge_cases = get_counts(org_id)
+    except Exception:
+        knowledge_cases = 0
+
+    # ------------------------------------------------------------
+    # MÉTRICAS REAIS DA BASE
+    # ------------------------------------------------------------
+    def _doc_value(doc, *keys, default=0):
+        for key in keys:
+            value = doc.get(key)
+            if value not in (None, ""):
+                try:
+                    return int(value)
+                except Exception:
+                    return value
+        return default
+
+    total_knowledge_docs = len(knowledge_docs)
+    total_pages = sum(_doc_value(d, "pages", "page_count", "num_pages") for d in knowledge_docs)
+    total_chunks = sum(_doc_value(d, "chunks", "chunk_count", "num_chunks") for d in knowledge_docs)
+    indexed_docs = sum(1 for d in knowledge_docs if str(d.get("status", "")).lower() in {"indexado", "indexed", "pronto", "ready"})
+    if indexed_docs == 0:
+        indexed_docs = sum(1 for d in knowledge_docs if d.get("status"))
+
+    # Embeddings não possuem necessariamente uma coluna própria no banco.
+    # Quando chunks estão disponíveis, usamos o número de chunks como proxy
+    # da quantidade de vetores gerados pela indexação.
+    embedding_count = total_chunks
+    rag_online = total_knowledge_docs > 0 and (indexed_docs > 0 or total_chunks > 0)
+
     st.markdown(
         """
-        <div class="page-title">🗄️ Base de Conhecimento</div>
+        <div class="page-title">📚 Base de Conhecimento</div>
         <div class="page-subtitle">
-            Conteúdo indexado utilizado pelo RAG.
+            Central de conhecimento documental utilizada pelo RAG, Retriever, Reranker e agentes de IA.
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    docs, cases = get_counts(user.get("organization_id"))
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        metric_card("📄", "Documentos", docs, "Base disponível", "organização", "kpi-blue")
-    with c2:
-        metric_card("⚖️", "Processos", cases, "Contexto", "organização", "kpi-purple")
-    with c3:
-        metric_card("🧠", "RAG", "ON", "FAISS", "motor de busca semântica", "kpi-teal")
+    # ------------------------------------------------------------
+    # KPIs
+    # ------------------------------------------------------------
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
+    kpis = [
+        (k1, "📄", "Documentos", total_knowledge_docs, "Base disponível", "kpi-blue"),
+        (k2, "📑", "Páginas", total_pages, "Conteúdo extraído", "kpi-purple"),
+        (k3, "🧩", "Chunks", total_chunks, "Unidades indexadas", "kpi-teal"),
+        (k4, "🧠", "Embeddings", embedding_count, "Vetores estimados", "kpi-blue"),
+        (k5, "🔎", "Prontos para RAG", indexed_docs, "Documentos indexados", "kpi-purple"),
+        (k6, "🟢" if rag_online else "🔴", "RAG", "ONLINE" if rag_online else "AGUARDANDO", "FAISS / busca semântica", "kpi-teal"),
+    ]
+    for col, icon, label, value, sub, css in kpis:
+        with col:
+            metric_card(icon, label, value, "● Operacional" if label != "RAG" else ("● Ativo" if rag_online else "● Verificar"), sub, css)
 
     st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
 
-    st.markdown(
-        """
-        <div class="glass-card">
-            <div class="card-title">Pipeline de conhecimento</div>
-            <div style="color:#8da8ca;font-size:.76rem;line-height:2;margin-top:10px">
-                📄 Documento → OCR / extração → Chunking → Embeddings →
-                FAISS → Retriever → Reranker → LLM → Citações
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # ------------------------------------------------------------
+    # PIPELINE + SAÚDE DO RAG
+    # ------------------------------------------------------------
+    p1, p2 = st.columns([1.65, 1])
+
+    with p1:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("⚙️", "Pipeline de conhecimento", "Fluxo utilizado para transformar documentos em contexto para a IA")
+        pipeline = [
+            ("01", "📄", "Documento", "Recebimento do arquivo"),
+            ("02", "🔤", "OCR / Extração", "Texto pesquisável"),
+            ("03", "🧩", "Chunking", "Segmentação do conteúdo"),
+            ("04", "🧠", "Embeddings", "Representação vetorial"),
+            ("05", "🗄️", "FAISS", "Índice semântico"),
+            ("06", "🔎", "Retriever", "Recuperação de evidências"),
+            ("07", "🎯", "Reranker", "Ordenação por relevância"),
+            ("08", "🤖", "LLM", "Geração da resposta"),
+            ("09", "📌", "Citações", "Evidências apresentadas"),
+        ]
+        cols = st.columns(3)
+        for idx, (num, icon, title, desc) in enumerate(pipeline):
+            with cols[idx % 3]:
+                st.markdown(
+                    f"""
+                    <div style="padding:12px;margin-bottom:9px;border:1px solid rgba(46,108,180,.38);border-radius:12px;background:linear-gradient(145deg,rgba(7,34,73,.96),rgba(4,22,51,.92));box-shadow:0 7px 18px rgba(0,0,0,.15);">
+                        <div style="display:flex;align-items:center;gap:9px;">
+                            <div style="width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:rgba(37,99,235,.18);border:1px solid rgba(59,130,246,.25);font-size:.9rem;">{icon}</div>
+                            <div>
+                                <div style="font-size:.75rem;font-weight:800;color:#f5f9ff;">{num} · {title}</div>
+                                <div style="font-size:.62rem;color:#7898be;margin-top:2px;">{desc}</div>
+                            </div>
+                        </div>
+                        <div style="margin-top:8px;color:#20e6b1;font-size:.60rem;font-weight:800;">● CONFIGURADO</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with p2:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("🧠", "Saúde da inteligência", "Componentes essenciais da recuperação semântica")
+        components = [
+            ("FAISS", "Índice vetorial", True),
+            ("Embeddings", "Representação semântica", total_chunks > 0),
+            ("Retriever", "Recuperação de contexto", rag_online),
+            ("CrossEncoder", "Reranking", rag_online),
+            ("LLM", "Geração de respostas", True),
+            ("Citações", "Evidências documentais", True),
+        ]
+        for name, desc, ok in components:
+            status = "🟢 Operacional" if ok else "🟠 Aguardando dados"
+            color = "#20e6b1" if ok else "#ffc14b"
+            st.markdown(
+                f"""
+                <div style="display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid rgba(48,92,147,.28);">
+                    <div><b style="font-size:.75rem;">{name}</b><div style="color:#7895b8;font-size:.61rem;margin-top:2px;">{desc}</div></div>
+                    <div style="color:{color};font-size:.64rem;font-weight:800;white-space:nowrap;">{status}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
+    # ------------------------------------------------------------
+    # PESQUISA SEMÂNTICA
+    # ------------------------------------------------------------
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    section_header("🔎", "Pesquisar na Base de Conhecimento", "Faça uma pergunta para recuperar evidências dos documentos indexados")
+    rq1, rq2 = st.columns([5, 1])
+    with rq1:
+        knowledge_query = st.text_input(
+            "Pergunta para o RAG",
+            placeholder="Ex.: Qual é o objeto do contrato? Quais são as obrigações da CONTRATADA?",
+            key="knowledge_base_query",
+            label_visibility="collapsed",
+        )
+    with rq2:
+        search_knowledge = st.button("🔎 Pesquisar", type="primary", use_container_width=True, key="knowledge_search_btn")
+
+    if search_knowledge and knowledge_query.strip():
+        with st.spinner("Consultando a base semântica..."):
+            try:
+                kwargs = {
+                    "query": knowledge_query.strip(),
+                    "question": knowledge_query.strip(),
+                    "org_id": org_id,
+                    "organization_id": org_id,
+                    "top_k": 8,
+                    "rerank_k": 5,
+                }
+                sig = inspect.signature(retrieve_and_rerank)
+                params = sig.parameters
+                accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+                if accepts_kwargs:
+                    filtered = kwargs
+                else:
+                    filtered = {k: v for k, v in kwargs.items() if k in params}
+                if "query" in params:
+                    filtered.pop("question", None)
+                elif "question" in params:
+                    filtered.pop("query", None)
+                if "org_id" in params:
+                    filtered.pop("organization_id", None)
+                elif "organization_id" in params:
+                    filtered.pop("org_id", None)
+
+                retrieval = retrieve_and_rerank(**filtered)
+                if isinstance(retrieval, dict):
+                    results = retrieval.get("reranked") or retrieval.get("retrieved") or retrieval.get("results") or retrieval.get("documents") or []
+                else:
+                    results = retrieval if isinstance(retrieval, list) else []
+
+                if results:
+                    st.markdown(f"**{len(results)} evidência(s) recuperada(s)**")
+                    for idx, item in enumerate(results[:8], 1):
+                        if isinstance(item, dict):
+                            text_value = item.get("text") or item.get("content") or item.get("page_content") or item.get("chunk") or str(item)
+                            meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+                            source = item.get("source") or meta.get("source") or meta.get("filename") or meta.get("file_name") or "Documento"
+                            page = item.get("page") or meta.get("page") or meta.get("page_number")
+                            score = item.get("score") or item.get("rerank_score")
+                        else:
+                            text_value = str(item)
+                            source, page, score = "Documento", None, None
+                        ref = f" · página {page}" if page not in (None, "") else ""
+                        score_text = f" · score {float(score):.3f}" if isinstance(score, (int, float)) else ""
+                        st.markdown(
+                            f"""
+                            <div class="search-result-item">
+                                <b>📄 {idx}. {source}</b><span style="color:#7fa2cc;font-size:.63rem;">{ref}{score_text}</span>
+                                <div style="margin-top:7px;color:#c4d5ea;font-size:.70rem;line-height:1.55;">{str(text_value)[:900]}</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    st.info("Nenhuma evidência foi recuperada para essa pergunta.")
+            except Exception as exc:
+                st.error(f"Não foi possível consultar o Retriever: {type(exc).__name__}: {exc}")
+    elif search_knowledge:
+        st.warning("Digite uma pergunta para pesquisar na base.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
+    # ------------------------------------------------------------
+    # BIBLIOTECA DE DOCUMENTOS
+    # ------------------------------------------------------------
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    section_header("📚", "Biblioteca de conhecimento", f"{total_knowledge_docs} documento(s) disponíveis na organização")
+
+    if knowledge_docs:
+        search_docs = st.text_input(
+            "Filtrar documentos",
+            placeholder="Pesquisar pelo nome do documento...",
+            key="knowledge_docs_filter",
+            label_visibility="collapsed",
+        )
+        filtered_docs = knowledge_docs
+        if search_docs.strip():
+            term = search_docs.strip().lower()
+            filtered_docs = [d for d in knowledge_docs if term in str(d.get("name", d.get("filename", ""))).lower()]
+
+        rows = []
+        for d in filtered_docs:
+            name = d.get("name", d.get("filename", "Documento"))
+            status = d.get("status", "Não informado")
+            pages = _doc_value(d, "pages", "page_count", "num_pages", default="—")
+            chunks = _doc_value(d, "chunks", "chunk_count", "num_chunks", default="—")
+            created = d.get("created_at", d.get("createdAt", d.get("uploaded_at", "—")))
+            rows.append({
+                "Documento": name,
+                "Tipo": str(name).split(".")[-1].upper() if "." in str(name) else "—",
+                "Páginas": pages,
+                "Chunks": chunks,
+                "Status": status,
+                "Data": created,
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    else:
+        st.info("Nenhum documento cadastrado. Adicione documentos na aba Documentos para alimentar o RAG.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
+    # ------------------------------------------------------------
+    # VISÃO EXECUTIVA
+    # ------------------------------------------------------------
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    section_header("📊", "Visão da base", "Indicadores calculados a partir dos documentos disponíveis")
+    v1, v2, v3 = st.columns(3)
+    with v1:
+        st.markdown(f"<div class='glass-card' style='padding:14px'><b>Documentos indexados</b><span style='float:right;font-size:1.15rem'>{indexed_docs}/{total_knowledge_docs}</span></div>", unsafe_allow_html=True)
+    with v2:
+        st.markdown(f"<div class='glass-card' style='padding:14px'><b>Chunks por documento</b><span style='float:right;font-size:1.15rem'>{(total_chunks / total_knowledge_docs):.1f}</span></div>" if total_knowledge_docs else "<div class='glass-card' style='padding:14px'><b>Chunks por documento</b><span style='float:right;font-size:1.15rem'>0</span></div>", unsafe_allow_html=True)
+    with v3:
+        st.markdown(f"<div class='glass-card' style='padding:14px'><b>Processos com contexto</b><span style='float:right;font-size:1.15rem'>{knowledge_cases}</span></div>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ============================================================

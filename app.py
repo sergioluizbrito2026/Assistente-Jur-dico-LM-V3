@@ -874,6 +874,58 @@ def build_report_csv(cases, documents, risks, deadlines):
     return out.getvalue().encode("utf-8-sig")
 
 
+
+def build_report_excel(summary, cases_df, documents, risks, deadlines):
+    """Gera um Excel profissional com resumo e uma aba para cada conjunto de dados."""
+    buffer = io.BytesIO()
+
+    doc_rows = [{
+        "Documento": d.get("name", d.get("filename", "Documento")),
+        "Status": d.get("status", ""),
+        "Páginas": d.get("pages", 0),
+        "Chunks": d.get("chunks", 0),
+    } for d in documents]
+    doc_df = pd.DataFrame(doc_rows, columns=["Documento", "Status", "Páginas", "Chunks"])
+
+    risk_df = pd.DataFrame(risks) if risks else pd.DataFrame(columns=["action", "details", "created_at"])
+    deadline_df = pd.DataFrame(deadlines) if deadlines else pd.DataFrame(columns=["date", "title", "description", "priority"])
+
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        summary_df = pd.DataFrame([
+            ["Processos", summary.get("processes", 0)],
+            ["Documentos", summary.get("documents", 0)],
+            ["Riscos registrados", summary.get("risks", 0)],
+            ["Prazos", summary.get("deadlines", 0)],
+            ["Alta prioridade", summary.get("high_priority", 0)],
+            ["Gerado em", datetime.now().strftime("%d/%m/%Y %H:%M")],
+        ], columns=["Indicador", "Valor"])
+        summary_df.to_excel(writer, sheet_name="Resumo", index=False)
+        cases_df.to_excel(writer, sheet_name="Processos", index=False)
+        doc_df.to_excel(writer, sheet_name="Documentos", index=False)
+        risk_df.to_excel(writer, sheet_name="Riscos", index=False)
+        deadline_df.to_excel(writer, sheet_name="Prazos", index=False)
+
+        wb = writer.book
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.utils import get_column_letter
+        header_fill = PatternFill("solid", fgColor="0B3B78")
+        header_font = Font(color="FFFFFF", bold=True)
+
+        for ws in wb.worksheets:
+            ws.freeze_panes = "A2"
+            for cell in ws[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            for col in range(1, ws.max_column + 1):
+                max_len = 0
+                for row in ws.iter_rows(min_col=col, max_col=col):
+                    value = row[0].value
+                    max_len = max(max_len, len(str(value or "")))
+                ws.column_dimensions[get_column_letter(col)].width = min(max(max_len + 2, 12), 45)
+
+    return buffer.getvalue()
+
 def build_report_pdf(summary, cases_df, doc_count, risks_count, deadlines):
     """Gera PDF simples e profissional. Importação tardia para não quebrar o app."""
     from reportlab.lib import colors
@@ -888,7 +940,7 @@ def build_report_pdf(summary, cases_df, doc_count, risks_count, deadlines):
     styles.add(ParagraphStyle(name="ReportTitle", parent=styles["Title"], fontSize=18, leading=22, textColor=colors.HexColor("#0B3B78"), alignment=TA_CENTER))
     styles.add(ParagraphStyle(name="Small", parent=styles["BodyText"], fontSize=8, leading=10))
     story = [
-        Paragraph("⚖️ Assistente Jurídico IA", styles["ReportTitle"]),
+        Paragraph("Assistente Juridico IA", styles["ReportTitle"]),
         Paragraph("Relatório executivo da operação jurídica · V3.1", styles["Normal"]),
         Spacer(1, 16),
     ]
@@ -2300,38 +2352,53 @@ elif page == "Relatórios":
     else:
         st.dataframe(case_df, use_container_width=True, hide_index=True)
 
+    high = sum(1 for c in filtered_cases if str(c.get("priority", "")).lower() == "alta")
     summary = {
         "processes": total_processes,
         "documents": total_documents,
         "risks": total_risks,
         "deadlines": total_deadlines,
+        "high_priority": high,
     }
-    b1, b2, b3 = st.columns([1, 1, 1.8])
+
+    st.markdown("<div style='margin-top:8px;margin-bottom:8px;font-weight:700;font-size:1rem'>📤 Exportar relatório</div>", unsafe_allow_html=True)
+    b1, b2, b3 = st.columns(3)
+    stamp = datetime.now().strftime('%Y%m%d_%H%M')
+
     with b1:
         st.download_button(
-            "⬇️ Baixar CSV",
+            "📄 Baixar PDF",
+            data=build_report_pdf(summary, case_df, total_documents, total_risks, deadlines),
+            file_name=f"relatorio_juridico_{stamp}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            key="download_report_pdf",
+        )
+
+    with b2:
+        st.download_button(
+            "📊 Baixar Excel",
+            data=build_report_excel(summary, case_df, documents, risks, deadlines),
+            file_name=f"relatorio_juridico_{stamp}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="download_report_excel",
+        )
+
+    with b3:
+        st.download_button(
+            "📋 Baixar CSV",
             data=build_report_csv(filtered_cases, documents, risks, deadlines),
-            file_name=f"relatorio_juridico_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            file_name=f"relatorio_juridico_{stamp}.csv",
             mime="text/csv",
             use_container_width=True,
+            key="download_report_csv",
         )
-    with b2:
-        try:
-            pdf_bytes = build_report_pdf(summary, case_df, total_documents, total_risks, deadlines)
-            st.download_button(
-                "📄 Baixar PDF",
-                data=pdf_bytes,
-                file_name=f"relatorio_juridico_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-            )
-        except Exception as exc:
-            st.warning(f"PDF indisponível neste ambiente: {exc}")
-    with b3:
-        st.markdown(
-            "<div style='padding:10px 12px;color:#89a7cc;font-size:.70rem'>💡 O relatório respeita os filtros selecionados e utiliza os dados disponíveis no banco da organização.</div>",
-            unsafe_allow_html=True,
-        )
+
+    st.markdown(
+        "<div style='padding:10px 12px;color:#89a7cc;font-size:.70rem'>💡 PDF para apresentação, Excel para análise e CSV para integração. Os arquivos usam os dados disponíveis na organização.</div>",
+        unsafe_allow_html=True,
+    )
     st.markdown("</div>", unsafe_allow_html=True)
 
 

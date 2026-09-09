@@ -21,3 +21,18 @@ torch>=2.2,<3
 torchvision>=0.17,<1
 
 plotly>=5.0,<6
+
+streamlit
+pandas
+plotly
+reportlab
+openpyxl
+pypdf
+python-docx
+PyMuPDF
+pytesseract
+faiss-cpu
+sentence-transformers
+bcrypt
+google-genai
+openai

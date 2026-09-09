@@ -459,8 +459,13 @@ if not user:
         if submitted:
             try:
                 if authenticate(email, password):
+                    # CORREÇÃO (item 2.6): audit() agora grava de verdade
+                    # na tabela audit_logs (antes só fazia print() e nunca
+                    # era chamado em lugar nenhum do app).
+                    audit(action="login", details={"email": email})
                     st.rerun()
                 else:
+                    audit(action="login_failed", details={"email": email})
                     st.error("Credenciais inválidas.")
             except Exception as exc:
                 st.error(f"Erro durante autenticação: {exc}")
@@ -553,6 +558,7 @@ with st.sidebar:
         # CORREÇÃO (item 2.8): antes só mostrava um aviso e não
         # encerrava a sessão de fato. logout() já existia e
         # funcionava em services.auth, só não era chamado aqui.
+        audit(action="logout")
         logout()
         st.rerun()
 
@@ -976,35 +982,51 @@ elif page == "Assistente IA":
 
                 raw_response = str(result.get("answer", "") or "").strip()
 
-                # Geração de resposta inteligente baseada no Agente escolhido no topo
-                current_agent = selected_agent_label
-                
-                if "nenhum provedor LLM está configurado" in raw_response.lower() or "modo demonstração" in raw_response.lower() or not raw_response:
-                    if "Risco" in current_agent:
-                        response = (
-                            "**⚠️ Parecer do Agente de Risco (Modo Simulação Inteligente)**\n\n"
-                            "1. **Exposição Contratual (Cláusula 8):** Detectada ausência de salvaguardas claras em caso de rescisão unilateral.\n"
-                            "2. **Impacto Financeiro:** Estimado em médio prazo devido a multas rescisórias ambíguas.\n"
-                            "3. **Recomendação:** Aditar o instrumento para estipular teto de penalidades."
+                # CORREÇÃO (item 2.1): antes, qualquer resposta vazia OU em
+                # modo demonstração era substituída por um parecer jurídico
+                # fabricado na hora ("Modo Simulação Inteligente"), com
+                # citações, riscos e recomendações inventados — indistinguível
+                # de uma análise real aos olhos do usuário. Isso valia tanto
+                # para "sem provedor configurado" quanto para falhas reais de
+                # API (timeout, chave inválida, rate limit), que retornam
+                # answer="" da mesma forma. Um sistema jurídico não pode
+                # mascarar essas duas situações com texto que parece análise.
+                #
+                # Agora: mostramos exatamente o que aconteceu, sem inventar
+                # conteúdo jurídico nenhum.
+
+                is_demo_mode = (
+                    "nenhum provedor llm está configurado" in raw_response.lower()
+                    or "modo demonstração" in raw_response.lower()
+                )
+
+                if is_demo_mode:
+                    st.info(
+                        "🔧 **Nenhum provedor de IA está configurado neste ambiente.** "
+                        "Esta é uma mensagem informativa do sistema, não uma análise jurídica.\n\n"
+                        "Configure `LLM_PROVIDER=gemini` (com `GEMINI_API_KEY`) ou "
+                        "`LLM_PROVIDER=openai` (com `OPENAI_API_KEY`) nas variáveis de "
+                        "ambiente para obter respostas reais."
+                    )
+                    response = (
+                        "_Nenhuma análise foi gerada: o provedor de IA não está "
+                        "configurado neste ambiente. Veja o aviso acima._"
+                    )
+                elif not raw_response:
+                    orchestrator_error = str(result.get("error") or "").strip()
+                    st.error(
+                        "❌ **Não foi possível gerar uma resposta.**\n\n"
+                        + (
+                            f"Detalhe técnico: {orchestrator_error}"
+                            if orchestrator_error
+                            else "O serviço de IA não retornou conteúdo. Tente novamente "
+                                 "em instantes ou verifique os logs do sistema."
                         )
-                    elif "Resumo" in current_agent:
-                        response = (
-                            "**📝 Resumo Executivo (Agente de Síntese)**\n\n"
-                            "O documento analisado estabelece as diretrizes de prestação de serviços entre as partes, "
-                            "destacando o prazo de vigência de 12 meses, reajustes baseados no IPCA e obrigações recíprocas de conformidade."
-                        )
-                    elif "RAG" in current_agent:
-                        response = (
-                            "**🔎 Relatório da Base Jurídica (RAG Extendido)**\n\n"
-                            "Foram recuperados 4 trechos altamente relevantes na base vetorial. "
-                            "A jurisprudência interna aponta precedentes favoráveis em casos de litígios contratuais semelhantes."
-                        )
-                    else:
-                        response = (
-                            "**⚖️ Análise Jurídica Especializada (Agente Geral)**\n\n"
-                            "A análise detalhada do objeto da consulta revela conformidade parcial com a legislação vigente. "
-                            "Recomenda-se atenção especial aos prazos de entrega e às condições de reajuste estipuladas."
-                        )
+                    )
+                    response = (
+                        "_Nenhuma análise foi gerada devido a uma falha no serviço de IA. "
+                        "Veja o erro acima._"
+                    )
                 else:
                     response = raw_response
 

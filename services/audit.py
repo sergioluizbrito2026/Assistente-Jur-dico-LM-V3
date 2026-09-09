@@ -1,320 +1,293 @@
-from __future__ import annotations
-
 """
-Assistente Jurídico SaaS IA V3.1
+Assistente Jurídico SaaS IA
 services/audit.py
 
-Módulo de auditoria e registro de logs de ações do sistema.
+Módulo de auditoria — grava eventos reais na tabela audit_logs.
+
+CORREÇÃO (item 2.6): a versão anterior deste arquivo continha uma
+cópia acidental (e quebrada — chamava get_connection()/verify_password()
+sem importar nenhum dos dois) de uma versão antiga de services/auth.py.
+A função audit() real só fazia print() no console; a tabela audit_logs
+nunca era escrita. Esta versão remove todo o código de autenticação
+duplicado (a versão correta e única de auth já existe em services/auth.py)
+e implementa a gravação de verdade.
 """
 
-from typing import Any, Optional
-import streamlit as st
+from __future__ import annotations
 
-def audit(action: str, details: Optional[str] = None, user_id: Optional[int] = None) -> None:
+import json
+import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from db import get_connection
+
+
+logger = logging.getLogger(__name__)
+
+
+def _now() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+# ============================================================
+# REGISTRO DE EVENTO
+# ============================================================
+
+def audit(
+    action: str,
+    details: Any = None,
+    user_id: Optional[int] = None,
+    organization_id: Optional[int] = None,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[int] = None,
+) -> bool:
     """
-    Registra um evento de auditoria no sistema.
-    """
-    # Implementação básica do registro de auditoria
-    try:
-        # Você pode adaptar para salvar no banco de dados ou logs se necessário
-        print(f"[AUDIT] Ação: {action} | Detalhes: {details} | Usuário: {user_id}")
-    except Exception as e:
-        print(f"[AUDIT ERROR] {e}")
+    Registra um evento de auditoria na tabela audit_logs.
 
-# ============================================================
-# CONFIGURAÇÃO
-# ============================================================
-
-SESSION_USER_KEY = "current_user"
-
-# ============================================================
-# NORMALIZAÇÃO
-# ============================================================
-
-def _normalize_email(email: Any) -> str:
-    """Normaliza o endereço de e-mail."""
-    return str(email or "").strip().lower()
-
-def _normalize_password(password: Any) -> str:
-    """Converte a senha para string sem alterar seu conteúdo."""
-    return str(password or "")
-
-# ============================================================
-# AUTENTICAÇÃO
-# ============================================================
-
-def authenticate(email: str, password: str) -> bool:
-    """
-    Autentica um usuário utilizando e-mail e senha.
+    Parâmetros:
+        action           -> obrigatório. Ex.: "login", "document_upload",
+                             "document_delete", "case_create", "ai_query".
+        details           -> texto livre ou dict/list (serializado como
+                             JSON na coluna metadata).
+        user_id           -> se omitido, tenta obter da sessão atual
+                             (services.auth.get_current_user_id()).
+        organization_id   -> se omitido, tenta obter da sessão atual
+                             (services.auth.get_current_organization_id()).
+        entity_type       -> ex.: "document", "case". Opcional.
+        entity_id         -> ID da entidade afetada. Opcional.
 
     Retorna:
-        True  -> autenticação realizada.
-        False -> credenciais inválidas.
+        True  -> evento gravado com sucesso.
+        False -> falhou (ação vazia ou erro de banco) — nunca lança
+                 exceção, para não derrubar o fluxo principal do app
+                 por causa de um log de auditoria.
     """
-    email = _normalize_email(email)
-    password = _normalize_password(password)
 
-    if not email or not password:
+    action = (action or "").strip()
+
+    if not action:
+        logger.warning("audit() chamado sem 'action' — evento ignorado.")
         return False
 
-    try:
-        with get_connection() as conn:
-            row = conn.execute(
-                """
-                SELECT
-                    id,
-                    organization_id,
-                    name,
-                    email,
-                    password_hash,
-                    role,
-                    created_at
-                FROM users
-                WHERE LOWER(email) = ?
-                LIMIT 1
-                """,
-                (email,),
-            ).fetchone()
+    # --------------------------------------------------------
+    # Preenche user_id/organization_id a partir da sessão atual
+    # quando não informados explicitamente.
+    # --------------------------------------------------------
 
-        if not row:
-            return False
-
-        password_hash = row["password_hash"]
-
-        if not password_hash:
-            return False
+    if user_id is None or organization_id is None:
 
         try:
-            valid_password = verify_password(password, password_hash)
+            from services.auth import (
+                get_current_user_id,
+                get_current_organization_id,
+            )
+
+            if user_id is None:
+                user_id = get_current_user_id()
+
+            if organization_id is None:
+                organization_id = get_current_organization_id()
+
         except Exception:
-            return False
+            # Contexto sem sessão Streamlit ativa (ex.: script standalone).
+            # Segue sem user_id/organization_id — a tabela permite NULL.
+            pass
 
-        if not valid_password:
-            return False
+    # --------------------------------------------------------
+    # Normaliza metadata
+    # --------------------------------------------------------
 
-        user = dict(row)
-        user.pop("password_hash", None)
+    if isinstance(details, (dict, list)):
 
-        st.session_state[SESSION_USER_KEY] = user
-        st.session_state["authenticated"] = True
-        st.session_state["user_id"] = user.get("id")
-        st.session_state["organization_id"] = user.get("organization_id")
-        st.session_state["org_id"] = user.get("organization_id")
-        st.session_state["perfil_nome"] = user.get("name", "")
-        st.session_state["perfil_email"] = user.get("email", "")
-        st.session_state["perfil_role"] = user.get("role", "")
+        try:
+            metadata = json.dumps(details, ensure_ascii=False, default=str)
+        except Exception:
+            metadata = str(details)
+
+    elif details is None:
+        metadata = None
+
+    else:
+        metadata = json.dumps(
+            {"message": str(details)},
+            ensure_ascii=False,
+        )
+
+    # --------------------------------------------------------
+    # Gravação
+    # --------------------------------------------------------
+
+    try:
+
+        with get_connection() as c:
+
+            c.execute(
+                """
+                INSERT INTO audit_logs(
+                    organization_id,
+                    user_id,
+                    action,
+                    entity_type,
+                    entity_id,
+                    metadata,
+                    created_at
+                )
+                VALUES (?,?,?,?,?,?,?)
+                """,
+                (
+                    organization_id,
+                    user_id,
+                    action,
+                    entity_type,
+                    entity_id,
+                    metadata,
+                    _now(),
+                ),
+            )
 
         return True
 
-    except Exception:
+    except Exception as exc:
+
+        logger.exception(
+            "Falha ao gravar log de auditoria (action=%s): %s",
+            action,
+            exc,
+        )
+
         return False
 
+
 # ============================================================
-# USUÁRIO ATUAL
+# CONSULTA
 # ============================================================
 
-def get_current_user() -> Optional[Dict[str, Any]]:
+def list_audit_logs(
+    organization_id: int,
+    limit: int = 200,
+) -> List[Dict[str, Any]]:
     """
-    Retorna o usuário atualmente autenticado.
-    Retorna None quando não existe sessão válida.
+    Lista os eventos de auditoria mais recentes de uma organização,
+    do mais novo para o mais antigo.
+
+    Útil para alimentar a tela "Auditoria" do app com dado real
+    em vez de conteúdo estático.
     """
-    user = st.session_state.get(SESSION_USER_KEY)
-    if not user or not isinstance(user, dict):
-        return None
-    return user
-
-# ============================================================
-# STATUS DE AUTENTICAÇÃO
-# ============================================================
-
-def is_authenticated() -> bool:
-    """Verifica se existe usuário autenticado."""
-    user = get_current_user()
-    if not user:
-        return False
-
-    return bool(st.session_state.get("authenticated", False))
-
-# ============================================================
-# ORGANIZAÇÃO ATUAL
-# ============================================================
-
-def get_current_org_id() -> Optional[int]:
-    """Retorna o ID da organização do usuário autenticado."""
-    user = get_current_user()
-    if not user:
-        return None
-
-    organization_id = user.get("organization_id")
-    if organization_id is None:
-        organization_id = st.session_state.get("organization_id")
-    if organization_id is None:
-        organization_id = st.session_state.get("org_id")
 
     try:
-        return int(organization_id)
+        organization_id = int(organization_id)
     except (TypeError, ValueError):
-        return None
-
-def get_current_organization_id() -> Optional[int]:
-    """Alias compatível para obter a organização atual."""
-    return get_current_org_id()
-
-# ============================================================
-# ID DO USUÁRIO
-# ============================================================
-
-def get_current_user_id() -> Optional[int]:
-    """Retorna o ID do usuário autenticado."""
-    user = get_current_user()
-    if not user:
-        return None
-
-    user_id = user.get("id")
-    if user_id is None:
-        user_id = st.session_state.get("user_id")
+        return []
 
     try:
-        return int(user_id)
+        limit = int(limit)
     except (TypeError, ValueError):
-        return None
+        limit = 200
 
-# ============================================================
-# PERFIL
-# ============================================================
+    limit = max(1, min(limit, 1000))
 
-def get_current_user_name() -> str:
-    """Retorna o nome do usuário atual."""
-    user = get_current_user()
-    if not user:
-        return ""
-    return str(user.get("name", "") or "")
+    with get_connection() as c:
 
-def get_current_user_email() -> str:
-    """Retorna o e-mail do usuário atual."""
-    user = get_current_user()
-    if not user:
-        return ""
-    return str(user.get("email", "") or "")
+        rows = c.execute(
+            """
+            SELECT *
+            FROM audit_logs
+            WHERE organization_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (
+                organization_id,
+                limit,
+            ),
+        ).fetchall()
 
-def get_current_user_role() -> str:
-    """Retorna o perfil/função do usuário atual."""
-    user = get_current_user()
-    if not user:
-        return ""
-    return str(user.get("role", "") or "")
+    results: List[Dict[str, Any]] = []
 
-# ============================================================
-# LOGOUT
-# ============================================================
+    for row in rows:
 
-def logout() -> None:
-    """Encerra a sessão do usuário atual."""
-    keys_to_remove = [
-        SESSION_USER_KEY,
-        "authenticated",
-        "user_id",
-        "organization_id",
-        "org_id",
-        "perfil_nome",
-        "perfil_email",
-        "perfil_role",
-    ]
-    for key in keys_to_remove:
-        st.session_state.pop(key, None)
+        item = dict(row)
 
-# ============================================================
-# LIMPEZA DE SESSÃO
-# ============================================================
+        if item.get("metadata"):
 
-def clear_auth_session() -> None:
-    """Limpa completamente os dados de autenticação."""
-    logout()
+            try:
+                item["metadata"] = json.loads(item["metadata"])
+            except (TypeError, ValueError):
+                pass  # mantém como string se não for JSON válido
 
-# ============================================================
-# CONTEXTO DE AUTENTICAÇÃO
-# ============================================================
+        results.append(item)
 
-def get_auth_context() -> Dict[str, Any]:
-    """Retorna informações estruturadas da sessão atual."""
-    user = get_current_user()
-    if not user:
-        return {
-            "authenticated": False,
-            "user": None,
-            "user_id": None,
-            "organization_id": None,
-            "role": None,
-        }
+    return results
 
-    return {
-        "authenticated": True,
-        "user": user,
-        "user_id": get_current_user_id(),
-        "organization_id": get_current_org_id(),
-        "role": user.get("role"),
-    }
 
-# ============================================================
-# PROTEÇÃO DE PÁGINA
-# ============================================================
-
-def require_authentication() -> bool:
+def count_audit_logs(organization_id: int) -> int:
     """
-    Verifica se existe autenticação válida.
-    Retorna:
-        True  -> usuário autenticado.
-        False -> usuário não autenticado.
+    Retorna o total de eventos de auditoria de uma organização.
     """
-    if is_authenticated():
-        return True
 
-    st.warning("É necessário realizar o login para acessar esta área.")
-    return False
+    try:
+        organization_id = int(organization_id)
+    except (TypeError, ValueError):
+        return 0
+
+    with get_connection() as c:
+
+        row = c.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM audit_logs
+            WHERE organization_id = ?
+            """,
+            (organization_id,),
+        ).fetchone()
+
+    return int(row["total"]) if row else 0
+
 
 # ============================================================
-# TESTE DO MÓDULO
+# SELF TEST
 # ============================================================
 
 def self_test() -> Dict[str, Any]:
-    """Teste estrutural do módulo."""
-    required_functions = [
-        "authenticate",
-        "get_current_user",
-        "is_authenticated",
-        "get_current_org_id",
-        "get_current_organization_id",
-        "get_current_user_id",
-        "get_current_user_name",
-        "get_current_user_email",
-        "get_current_user_role",
-        "logout",
-        "clear_auth_session",
-        "get_auth_context",
-        "require_authentication",
+    """
+    Teste estrutural. Não grava nada no banco.
+    """
+
+    required = [
+        "audit",
+        "list_audit_logs",
+        "count_audit_logs",
     ]
 
-    missing_functions = [
-        name for name in required_functions if name not in globals()
+    missing = [
+        name
+        for name in required
+        if name not in globals()
     ]
 
     return {
-        "module": "services.auth",
-        "status": "ok" if not missing_functions else "error",
-        "required_functions": required_functions,
-        "missing_functions": missing_functions,
+        "module": "services.audit",
+        "status": "ok" if not missing else "error",
+        "required_functions": required,
+        "missing_functions": missing,
     }
+
 
 # ============================================================
 # EXECUÇÃO DIRETA
 # ============================================================
 
 if __name__ == "__main__":
+
     result = self_test()
+
     print("=" * 60)
-    print("AUTH.PY V3.1 - SELF TEST")
+    print("AUDIT.PY - SELF TEST")
     print("=" * 60)
+
     print(f"Status: {result['status']}")
     print(f"Funções obrigatórias: {len(result['required_functions'])}")
     print(f"Funções ausentes: {result['missing_functions']}")
+
     print("=" * 60)

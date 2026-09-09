@@ -17,9 +17,9 @@ google-genai>=1.0,<2
 openai>=1.0,<3
 anthropic>=0.40,<1
 
-# Torch e torchvision fixados para evitar builds inconsistentes
 torch>=2.2,<3
 torchvision>=0.17,<1
 
-# Adicionado o limite de versão para o Plotly (boa prática para evitar quebras)
 plotly>=5.0,<6
+tesseract-ocr
+libgl1-mesa-glx

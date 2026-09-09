@@ -41,6 +41,7 @@ from services.cases import (
 from services.documents import list_documents, document_status, delete_document
 from services.rag_pipeline import rag_answer, retrieve_and_rerank
 from services.ai_orchestrator import orchestrate, risk_analysis
+from services.ai import ai_status, clear_ai_cache
 from services.auth import authenticate, get_current_user, logout
 from services.ingestion import ingest_document
 
@@ -119,6 +120,81 @@ st.markdown(
 [data-testid="stSidebar"] > div:first-child{
     padding-top:1rem;
 }
+
+/* ---------- SIDEBAR PREMIUM V3.2 ---------- */
+[data-testid="stSidebar"]{
+    min-width:290px !important;
+    max-width:290px !important;
+}
+[data-testid="stSidebar"] > div:first-child{
+    padding:1rem .85rem 1.5rem !important;
+}
+[data-testid="stSidebar"] .stButton{ margin:5px 0 !important; }
+[data-testid="stSidebar"] .stButton > button{
+    min-height:44px !important;
+    border-radius:12px !important;
+    border:1px solid rgba(61,132,224,.28) !important;
+    background:linear-gradient(180deg,rgba(10,39,82,.92),rgba(5,25,57,.92)) !important;
+    color:#eef6ff !important;
+    font-weight:650 !important;
+    text-align:left !important;
+    padding:8px 13px !important;
+    box-shadow:0 6px 18px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.045) !important;
+    transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease !important;
+}
+[data-testid="stSidebar"] .stButton > button:hover{
+    transform:translateX(3px) !important;
+    border-color:rgba(48,145,255,.75) !important;
+    box-shadow:0 9px 24px rgba(0,102,255,.24), inset 0 1px 0 rgba(255,255,255,.06) !important;
+}
+[data-testid="stSidebar"] .sidebar-active .stButton > button{
+    background:linear-gradient(90deg,#075fe6,#124cc4) !important;
+    border-color:#2188ff !important;
+    box-shadow:0 9px 26px rgba(0,100,255,.34) !important;
+}
+.sidebar-section-space{
+    margin-top:16px;
+    padding-top:10px;
+    border-top:1px solid rgba(62,111,173,.24);
+}
+.top-search-wrap [data-testid="stTextInput"] input{
+    height:42px !important;
+    border-radius:13px !important;
+    border:1px solid #1d5595 !important;
+    background:linear-gradient(180deg,rgba(7,32,69,.96),rgba(3,19,44,.96)) !important;
+    color:#f4f8ff !important;
+    box-shadow:0 7px 24px rgba(0,0,0,.20), inset 0 1px 0 rgba(255,255,255,.04) !important;
+}
+.top-search-wrap [data-testid="stTextInput"] input:focus{
+    border-color:#318cff !important;
+    box-shadow:0 0 0 2px rgba(49,140,255,.16), 0 9px 28px rgba(0,80,220,.20) !important;
+}
+.search-results{
+    margin:8px 0 16px;
+    padding:14px;
+    border:1px solid #1b4e8c;
+    border-radius:14px;
+    background:linear-gradient(180deg,rgba(7,29,63,.98),rgba(3,18,42,.98));
+    box-shadow:0 14px 35px rgba(0,0,0,.22);
+}
+.search-result-item{
+    padding:10px 12px;
+    border-radius:10px;
+    border:1px solid rgba(51,110,180,.20);
+    background:rgba(11,40,79,.55);
+    margin-top:7px;
+}
+.ai-status-card{
+    border:1px solid rgba(41,126,218,.42);
+    border-radius:14px;
+    padding:13px 15px;
+    background:linear-gradient(135deg,rgba(5,29,64,.95),rgba(8,39,82,.75));
+    box-shadow:0 10px 28px rgba(0,0,0,.18);
+}
+.ai-status-ok{color:#2ee6ad;font-weight:800}
+.ai-status-warn{color:#ffbd4a;font-weight:800}
+.ai-status-error{color:#ff6680;font-weight:800}
+
 
 [data-testid="stSidebar"] *{
     color:#edf6ff;
@@ -893,28 +969,32 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    page = st.radio(
-        "Navegação",
-        page_options,
-        index=page_options.index(st.session_state.page)
-        if st.session_state.page in page_options else 0,
-        format_func=lambda x: {
-            "Dashboard": "🏠  Dashboard",
-            "Assistente IA": "🤖  Assistente IA",
-            "Documentos": "📄  Documentos",
-            "Processos": "⚖️  Processos",
-            "Riscos": "🛡️  Riscos",
-            "Prazos": "📅  Prazos",
-            "Relatórios": "📊  Relatórios",
-            "Base de Conhecimento": "🗄️  Base de Conhecimento",
-            "Configurações": "⚙️  Configurações",
-            "Auditoria": "🛡️  Auditoria",
-            "Perfil": "👤  Perfil",
-        }.get(x, x),
-        label_visibility="collapsed",
-        key="main_navigation",
-    )
+    nav_items = [
+        ("Dashboard", "🏠"),
+        ("Assistente IA", "🤖"),
+        ("Documentos", "📄"),
+        ("Processos", "⚖️"),
+        ("Riscos", "🛡️"),
+        ("Prazos", "📅"),
+        ("Relatórios", "📊"),
+        ("Base de Conhecimento", "🗄️"),
+        ("Configurações", "⚙️"),
+        ("Auditoria", "🛡️"),
+        ("Perfil", "👤"),
+    ]
 
+    page = st.session_state.page
+    for nav_name, nav_icon in nav_items:
+        active = "sidebar-active" if page == nav_name else ""
+        st.markdown(f'<div class="{active}">', unsafe_allow_html=True)
+        if st.button(
+            f"{nav_icon}  {nav_name}",
+            key=f"nav_{nav_name}",
+            use_container_width=True,
+        ):
+            st.session_state.page = nav_name
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
     st.session_state.page = page
 
     st.markdown(
@@ -946,6 +1026,13 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
+    if st.button("🧹  Atualizar conexão IA", use_container_width=True):
+        try:
+            clear_ai_cache()
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Não foi possível atualizar a conexão: {exc}")
+
     if st.button("🚪  Sair do sistema", use_container_width=True):
         audit(action="logout")
         logout()
@@ -959,10 +1046,14 @@ with st.sidebar:
 top1, top2, top3, top4 = st.columns([7, .8, 1.25, 1.5])
 
 with top1:
-    st.markdown(
-        '<div class="top-search">🔍 &nbsp; Buscar processos, documentos, clientes... &nbsp;&nbsp; <span style="float:right">Ctrl + K</span></div>',
-        unsafe_allow_html=True,
+    st.markdown('<div class="top-search-wrap">', unsafe_allow_html=True)
+    global_search = st.text_input(
+        "Pesquisa global",
+        placeholder="🔍  Buscar processos, documentos, clientes...",
+        key="global_search",
+        label_visibility="collapsed",
     )
+    st.markdown("</div>", unsafe_allow_html=True)
 
 with top2:
     st.markdown(
@@ -983,6 +1074,63 @@ with top4:
     )
 
 st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+# ============================================================
+# PESQUISA GLOBAL
+# ============================================================
+
+if global_search and global_search.strip():
+    search_term = global_search.strip()
+    org_id = user.get("organization_id")
+    case_results = []
+    doc_results = []
+
+    try:
+        case_results = search_cases(org_id, search_term, limit=8) or []
+    except Exception:
+        case_results = []
+
+    try:
+        all_docs = list_documents(org_id) or []
+        term_lower = search_term.lower()
+        doc_results = [
+            d for d in all_docs
+            if term_lower in str(d.get("name", d.get("filename", ""))).lower()
+        ][:8]
+    except Exception:
+        doc_results = []
+
+    st.markdown(
+        f'<div class="search-results"><b>🔎 Resultados para:</b> {search_term}',
+        unsafe_allow_html=True,
+    )
+
+    if case_results:
+        st.markdown("**⚖️ Processos**", unsafe_allow_html=True)
+        for item in case_results:
+            title = item.get("title", "Processo")
+            client = item.get("client", "Cliente não informado")
+            st.markdown(
+                f'<div class="search-result-item">⚖️ <b>{title}</b><br>'
+                f'<span style="color:#8eabd0">Cliente: {client} · Status: {item.get("status","N/D")}</span></div>',
+                unsafe_allow_html=True,
+            )
+
+    if doc_results:
+        st.markdown("**📄 Documentos**", unsafe_allow_html=True)
+        for item in doc_results:
+            name = item.get("name", item.get("filename", "Documento"))
+            st.markdown(
+                f'<div class="search-result-item">📄 <b>{name}</b><br>'
+                f'<span style="color:#8eabd0">Status: {item.get("status","N/D")}</span></div>',
+                unsafe_allow_html=True,
+            )
+
+    if not case_results and not doc_results:
+        st.info("Nenhum processo ou documento encontrado para essa pesquisa.")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
 
 
 # ============================================================
@@ -1216,6 +1364,35 @@ elif page == "Assistente IA":
         unsafe_allow_html=True,
     )
 
+    try:
+        llm_status = ai_status()
+    except Exception as exc:
+        llm_status = {
+            "status": "error",
+            "provider": "indisponível",
+            "model": "N/D",
+            "configured": False,
+            "error": str(exc),
+        }
+
+    status_value = str(llm_status.get("status", "unknown"))
+    provider_value = str(llm_status.get("provider", "N/D"))
+    model_value = str(llm_status.get("model", "N/D"))
+
+    if status_value == "connected":
+        status_html = f'<span class="ai-status-ok">● IA conectada</span> · {provider_value} · {model_value}'
+    elif status_value == "demo":
+        status_html = '<span class="ai-status-warn">● Modo demonstração</span> · configure o provedor LLM no Streamlit'
+    else:
+        status_html = f'<span class="ai-status-error">● IA não configurada</span> · {provider_value}'
+
+    st.markdown(
+        f'<div class="ai-status-card">🤖 <b>Status do Assistente</b><br>'
+        f'<span style="color:#9db6d8;font-size:.82rem">{status_html}</span></div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
     with st.container(border=True):
         c1, c2, c3 = st.columns(3)
 
@@ -1296,13 +1473,21 @@ elif page == "Assistente IA":
                     )
 
                 answer = str(result.get("answer", "") or "").strip()
+                provider_error = result.get("error")
+
                 if not answer:
-                    answer = (
-                        "Não foi possível gerar uma resposta. "
-                        "Verifique o provedor de IA e as credenciais do ambiente."
-                    )
+                    answer = "Não foi possível gerar uma resposta."
 
                 st.markdown(answer)
+
+                if provider_error:
+                    st.warning(f"Detalhe técnico do Assistente: {provider_error}")
+
+                if result.get("agent_status") == "error" and not provider_error:
+                    primary = result.get("primary") or {}
+                    primary_error = primary.get("error") if isinstance(primary, dict) else None
+                    if primary_error:
+                        st.warning(f"Falha no agente: {primary_error}")
 
                 citations = result.get("citations") or []
                 if citations:

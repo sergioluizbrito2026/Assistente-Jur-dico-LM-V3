@@ -2165,382 +2165,116 @@ if page == "Super Admin":
                 st.caption(f'Usuários: {selected["users"]}/{selected["max_users"] if selected["max_users"] else "∞"}')
                 st.markdown('</div>', unsafe_allow_html=True)
 
-   with tab_plans:
-    with get_connection() as conn:
-        plan_rows = conn.execute(
-            """
-            SELECT
-                id,
-                name,
-                slug,
-                price_monthly,
-                max_users,
-                max_documents,
-                max_ai_queries,
-                max_storage_mb,
-                features,
-                active,
-                created_at
-            FROM plans
-            ORDER BY price_monthly, id
-            """
-        ).fetchall()
+    with tab_plans:
+        with get_connection() as conn:
+            plan_rows = conn.execute(
+                "SELECT id,name,slug,price_monthly,max_users,max_documents,max_ai_queries,max_storage_mb,features,active,created_at "
+                "FROM plans ORDER BY price_monthly,id"
+            ).fetchall()
 
-    plan_table = []
+        plan_table = []
+        for p in plan_rows:
+            try:
+                plan_price = float(p[3] or 0)
+            except (TypeError, ValueError):
+                plan_price = 0.0
 
-    for p in plan_rows:
-        # Estrutura da tabela plans:
-        # p[0] = id
-        # p[1] = name
-        # p[2] = slug
-        # p[3] = price_monthly
-        # p[4] = max_users
-        # p[5] = max_documents
-        # p[6] = max_ai_queries
-        # p[7] = max_storage_mb
-        # p[8] = features
-        # p[9] = active
-        # p[10] = created_at
-
-        try:
-            plan_price = float(p[3] or 0)
-        except (TypeError, ValueError):
-            plan_price = 0.0
-
-        plan_table.append(
-            {
+            plan_table.append({
                 "Plano": p[1],
-                "Preço/mês": (
-                    f"R$ {plan_price:,.2f}"
-                    .replace(",", "X")
-                    .replace(".", ",")
-                    .replace("X", ".")
-                ),
+                "Preço/mês": f"R$ {plan_price:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
                 "Usuários": p[4],
                 "Documentos": p[5],
                 "Consultas IA": p[6],
                 "Armazenamento MB": p[7],
                 "Status": "Ativo" if p[9] else "Inativo",
-            }
+            })
+
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("💳", "Planos comerciais", "Limites cadastrados no banco SaaS")
+        st.dataframe(pd.DataFrame(plan_table), use_container_width=True, hide_index=True)
+        st.caption(
+            "Nesta etapa, o Super Admin administra planos existentes. "
+            "A criação/edição comercial de novos planos pode ser adicionada junto ao módulo de cobrança."
         )
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown(
-        '<div class="section-card">',
-        unsafe_allow_html=True,
-    )
+    with tab_usage:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("🧠", "Consumo de IA", "Clientes e utilização da franquia")
 
-    section_header(
-        "💳",
-        "Planos comerciais",
-        "Limites cadastrados no banco SaaS",
-    )
+        usage_rows = []
+        for r in sorted(rows, key=lambda x: float(x.get("ai_used") or 0), reverse=True):
+            try:
+                ai_used = float(r.get("ai_used") or 0)
+            except (TypeError, ValueError):
+                ai_used = 0.0
 
-    if plan_table:
-        st.dataframe(
-            pd.DataFrame(plan_table),
-            use_container_width=True,
-            hide_index=True,
-        )
-    else:
-        st.info("Nenhum plano comercial cadastrado.")
+            try:
+                limit = float(r.get("max_ai") or 0)
+            except (TypeError, ValueError):
+                limit = 0.0
 
-    st.caption(
-        "Nesta etapa, o Super Admin administra os planos existentes. "
-        "A criação e edição comercial de novos planos poderá ser integrada "
-        "ao módulo de cobrança."
-    )
+            if limit > 0:
+                pct = (ai_used / limit) * 100
+                remaining = max(limit - ai_used, 0)
+                limit_display = int(limit) if limit.is_integer() else round(limit, 2)
+                remaining_display = int(remaining) if remaining.is_integer() else round(remaining, 2)
+                usage_display = f"{pct:.0f}%"
+            else:
+                limit_display = "∞"
+                remaining_display = "∞"
+                usage_display = "Ilimitado"
 
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-with tab_usage:
-    st.markdown(
-        '<div class="section-card">',
-        unsafe_allow_html=True,
-    )
-
-    section_header(
-        "🧠",
-        "Consumo de IA",
-        "Clientes e utilização da franquia",
-    )
-
-    usage_rows = []
-
-    for r in sorted(
-        rows,
-        key=lambda x: float(x.get("ai_used") or 0),
-        reverse=True,
-    ):
-        try:
-            ai_used = float(r.get("ai_used") or 0)
-        except (TypeError, ValueError):
-            ai_used = 0.0
-
-        try:
-            ai_limit = float(r.get("max_ai") or 0)
-        except (TypeError, ValueError):
-            ai_limit = 0.0
-
-        if ai_limit > 0:
-            percentage = (ai_used / ai_limit) * 100
-            remaining = max(ai_limit - ai_used, 0)
-
-            limit_display = (
-                int(ai_limit)
-                if ai_limit.is_integer()
-                else round(ai_limit, 2)
-            )
-
-            remaining_display = (
-                int(remaining)
-                if remaining.is_integer()
-                else round(remaining, 2)
-            )
-
-            usage_display = f"{percentage:.0f}%"
-        else:
-            percentage = 0
-            limit_display = "∞"
-            remaining_display = "∞"
-            usage_display = "Ilimitado"
-
-        usage_rows.append(
-            {
+            usage_rows.append({
                 "Organização": r.get("name", "-"),
                 "Plano": r.get("plan", "-"),
-                "Utilizado": (
-                    int(ai_used)
-                    if ai_used.is_integer()
-                    else round(ai_used, 2)
-                ),
+                "Utilizado": int(ai_used) if ai_used.is_integer() else round(ai_used, 2),
                 "Limite": limit_display,
                 "Restante": remaining_display,
                 "Uso": usage_display,
-                "Status": (
-                    "ATIVO"
-                    if r.get("status") == "active"
-                    else "SUSPENSO"
-                ),
-            }
-        )
+                "Status": "ATIVO" if r.get("status") == "active" else "SUSPENSO",
+            })
 
-    if usage_rows:
-        usage_df = pd.DataFrame(usage_rows)
+        if usage_rows:
+            usage_df = pd.DataFrame(usage_rows)
+            st.dataframe(usage_df, use_container_width=True, hide_index=True)
 
-        st.dataframe(
-            usage_df,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-        # --------------------------------------------------------
-        # GRÁFICO DE UTILIZAÇÃO
-        # --------------------------------------------------------
-
-        chart_df = usage_df[
-            usage_df["Limite"] != "∞"
-        ].copy()
-
-        if not chart_df.empty:
-            fig = go.Figure()
-
-            fig.add_trace(
-                go.Bar(
+            chart_df = usage_df[usage_df["Limite"] != "∞"].copy()
+            if not chart_df.empty:
+                fig = go.Figure()
+                fig.add_trace(go.Bar(
                     x=chart_df["Organização"],
                     y=chart_df["Utilizado"],
                     name="Utilizado",
                     marker=dict(color="#22d3ee"),
-                )
-            )
-
-            fig.add_trace(
-                go.Bar(
+                ))
+                fig.add_trace(go.Bar(
                     x=chart_df["Organização"],
                     y=chart_df["Limite"],
                     name="Limite",
                     marker=dict(color="#7c3aed"),
+                ))
+                fig.update_layout(
+                    barmode="group",
+                    height=300,
+                    margin=dict(l=8, r=8, t=20, b=8),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#a9c0df", size=10),
+                    xaxis=dict(showgrid=False),
+                    yaxis=dict(showgrid=True, gridcolor="rgba(47,88,140,.25)"),
+                    legend=dict(orientation="h", y=1.08),
                 )
-            )
-
-            fig.update_layout(
-                barmode="group",
-                height=320,
-                margin=dict(
-                    l=8,
-                    r=8,
-                    t=30,
-                    b=8,
-                ),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(
-                    color="#a9c0df",
-                    size=10,
-                ),
-                xaxis=dict(
-                    showgrid=False,
-                ),
-                yaxis=dict(
-                    showgrid=True,
-                    gridcolor="rgba(47,88,140,.25)",
-                ),
-                legend=dict(
-                    orientation="h",
-                    y=1.08,
-                ),
-            )
-
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-                config={
-                    "displayModeBar": False
-                },
-            )
-
-    else:
-        st.info(
-            "Ainda não há dados de consumo de IA."
-        )
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    section_header(
-        "🧠",
-        "Consumo de IA",
-        "Clientes e utilização da franquia"
-    )
-
-    usage_rows = []
-
-    for r in sorted(
-        rows,
-        key=lambda x: x["ai_used"],
-        reverse=True
-    ):
-        # Garantir que os valores numéricos sejam tratados corretamente
-        try:
-            ai_used = float(r["ai_used"] or 0)
-        except (TypeError, ValueError):
-            ai_used = 0.0
-
-        try:
-            limit = float(r["max_ai"] or 0)
-        except (TypeError, ValueError):
-            limit = 0.0
-
-        if limit > 0:
-            pct = (ai_used / limit) * 100
-            remaining = max(limit - ai_used, 0)
-            limit_display = int(limit) if limit.is_integer() else limit
-            remaining_display = (
-                int(remaining)
-                if remaining.is_integer()
-                else round(remaining, 2)
-            )
-            usage_display = f"{pct:.0f}%"
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                    config={"displayModeBar": False},
+                )
         else:
-            pct = 0
-            remaining_display = "∞"
-            limit_display = "∞"
-            usage_display = "Ilimitado"
+            st.info("Ainda não há dados de consumo.")
 
-        usage_rows.append({
-            "Organização": r["name"],
-            "Plano": r["plan"],
-            "Utilizado": (
-                int(ai_used)
-                if ai_used.is_integer()
-                else round(ai_used, 2)
-            ),
-            "Limite": limit_display,
-            "Restante": remaining_display,
-            "Uso": usage_display,
-            "Status": (
-                "ATIVO"
-                if r["status"] == "active"
-                else "SUSPENSO"
-            ),
-        })
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    if usage_rows:
-        usage_df = pd.DataFrame(usage_rows)
-
-        st.dataframe(
-            usage_df,
-            use_container_width=True,
-            hide_index=True
-        )
-
-        # Gráfico somente para planos com limite definido
-        chart_df = usage_df[
-            usage_df["Limite"] != "∞"
-        ].copy()
-
-        if not chart_df.empty:
-            fig = go.Figure()
-
-            fig.add_trace(
-                go.Bar(
-                    x=chart_df["Organização"],
-                    y=chart_df["Utilizado"],
-                    name="Utilizado",
-                    marker=dict(color="#22d3ee"),
-                )
-            )
-
-            fig.add_trace(
-                go.Bar(
-                    x=chart_df["Organização"],
-                    y=chart_df["Limite"],
-                    name="Limite",
-                    marker=dict(color="#7c3aed"),
-                )
-            )
-
-            fig.update_layout(
-                barmode="group",
-                height=300,
-                margin=dict(
-                    l=8,
-                    r=8,
-                    t=20,
-                    b=8
-                ),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(
-                    color="#a9c0df",
-                    size=10
-                ),
-                xaxis=dict(
-                    showgrid=False
-                ),
-                yaxis=dict(
-                    showgrid=True,
-                    gridcolor="rgba(47,88,140,.25)"
-                ),
-                legend=dict(
-                    orientation="h",
-                    y=1.08
-                ),
-            )
-
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-                config={
-                    "displayModeBar": False
-                }
-            )
-
-    else:
-        st.info(
-            "Ainda não há dados de consumo."
-        )
-
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ============================================================

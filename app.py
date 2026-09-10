@@ -356,6 +356,56 @@ st.markdown(
     opacity:.85;
 }
 
+/* ---------- SAAS SIDEBAR CARD ---------- */
+.saas-user-card{
+    margin:8px 0 12px;
+    padding:12px 13px 11px;
+    border:1px solid rgba(58,120,201,.30);
+    border-radius:15px;
+    background:linear-gradient(160deg,rgba(8,38,78,.92),rgba(4,22,48,.94));
+    box-shadow:0 12px 28px rgba(0,0,0,.20), inset 0 1px 0 rgba(255,255,255,.03);
+}
+.saas-user-head{display:flex;align-items:center;gap:9px}
+.saas-avatar{width:37px;height:37px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,#3b82f6,#123b7c);border:1px solid rgba(147,197,253,.55);font-size:18px;flex-shrink:0}
+.saas-user-copy{min-width:0;flex:1}
+.saas-greeting{font-size:.80rem;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.saas-role{font-size:.62rem;color:#89a9cf;margin-top:2px}
+.saas-chevron{font-size:1.05rem;color:#8db7e8}
+.saas-divider{height:1px;background:rgba(61,111,174,.24);margin:9px 0}
+.saas-org-row{display:flex;align-items:center;gap:7px;min-width:0}
+.saas-org-icon{font-size:.85rem}
+.saas-org-name{font-size:.70rem;font-weight:700;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.saas-plan-badge{font-size:.56rem;font-weight:800;color:#18e2ae;background:rgba(16,214,160,.12);border:1px solid rgba(16,214,160,.28);padding:3px 6px;border-radius:999px;white-space:nowrap}
+.saas-usage-row{display:flex;align-items:center;gap:7px}
+.saas-ai-icon{font-size:.9rem}
+.saas-usage-copy{flex:1;min-width:0}
+.saas-usage-title{font-size:.63rem;color:#8eadd0}
+.saas-usage-title b{float:right;color:#eaf4ff;font-size:.64rem}
+.saas-progress{height:6px;background:#12345e;border-radius:999px;overflow:hidden;margin-top:6px}
+.saas-progress span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#13d6bd,#20a7ff);box-shadow:0 0 10px rgba(32,167,255,.35)}
+.saas-percent{font-size:.61rem;color:#8faed0;min-width:32px;text-align:right}
+.saas-status{margin-top:7px;font-size:.58rem;color:#13dca5;font-weight:700}
+.saas-status::first-letter{color:#13dca5}
+.sidebar-section-title{margin-top:15px}
+.profile-arrow{color:#78a7dc;font-size:1.2rem;margin-left:auto}
+.super-admin-bottom{margin-top:10px;padding-top:10px;border-top:1px solid rgba(62,111,173,.24)}
+[data-testid="stSidebar"] .super-admin-bottom .stButton > button{
+    background:linear-gradient(180deg,rgba(73,34,130,.52),rgba(35,17,73,.58)) !important;
+    border-color:rgba(139,92,246,.38) !important;
+    color:#ddd1ff !important;
+}
+[data-testid="stSidebar"] .super-admin-bottom .stButton > button:hover{
+    background:linear-gradient(180deg,rgba(106,55,178,.68),rgba(50,25,100,.68)) !important;
+    border-color:rgba(167,139,250,.72) !important;
+    box-shadow:0 10px 24px -8px rgba(124,58,237,.48) !important;
+}
+[data-testid="stSidebar"] .sidebar-admin-active .stButton > button{
+    background:linear-gradient(90deg,#6d28d9,#4c1d95) !important;
+    border-color:rgba(196,181,253,.70) !important;
+    color:#fff !important;
+}
+.sidebar-logout-wrap{margin-top:5px}
+
 /* ---------- PROFILE ---------- */
 .sidebar-profile{
     border-top:1px solid rgba(62,111,173,.30);
@@ -758,6 +808,7 @@ def call_orchestrator(
     query: str,
     org_id: Any,
     mode: str = "auto",
+    user_id: Any = None,
     top_k: int = 8,
     rerank_k: int = 5,
     extra_context: str | None = None,
@@ -776,6 +827,10 @@ def call_orchestrator(
         "rerank_k": rerank_k,
         "extra_context": extra_context,
     }
+
+    allowed, quota_ctx = check_ai_quota(org_id)
+    if not allowed:
+        return {"answer": "O limite de consultas de IA do plano atual foi atingido. Faça upgrade do plano para continuar.", "citations": [], "retrieved": [], "reranked": [], "agent": "quota", "quota_exceeded": True, "quota": quota_ctx}
 
     try:
         signature = inspect.signature(orchestrate)
@@ -812,6 +867,8 @@ def call_orchestrator(
         result.setdefault("intent", "general")
         result.setdefault("guard", {"approved": False, "issues": []})
         result.setdefault("evaluation", {})
+        if str(result.get("answer", "") or "").strip() and result.get("agent") != "error":
+            register_ai_usage_local(org_id, user_id, "assistant_query", {"agent": result.get("agent"), "intent": result.get("intent")})
         return result
 
     except Exception as exc:
@@ -824,6 +881,177 @@ def call_orchestrator(
             "intent": "error",
             "error": f"{type(exc).__name__}: {exc}",
         }
+
+
+
+def get_saas_context(org_id):
+    """Lê o plano, consumo e limites da organização atual diretamente do banco SaaS."""
+    ctx = {"plan_name": "Profissional", "used_ai": 0, "max_ai": 0, "status": "active"}
+    try:
+        with get_connection() as conn:
+            org = conn.execute(
+                "SELECT plan FROM organizations WHERE id=?", (org_id,)
+            ).fetchone()
+            plan_name = org[0] if org and org[0] else "Profissional"
+            ctx["plan_name"] = str(plan_name)
+
+            sub = conn.execute(
+                "SELECT plan_id,status FROM subscriptions WHERE organization_id=? ORDER BY id DESC LIMIT 1",
+                (org_id,),
+            ).fetchone()
+            if sub:
+                ctx["status"] = str(sub[1] or "active")
+                plan = conn.execute(
+                    "SELECT name,max_ai_queries FROM plans WHERE id=?", (sub[0],)
+                ).fetchone()
+                if plan:
+                    ctx["plan_name"] = str(plan[0] or ctx["plan_name"])
+                    ctx["max_ai"] = int(plan[1] or 0)
+            else:
+                plan = conn.execute(
+                    "SELECT name,max_ai_queries FROM plans WHERE lower(slug)=lower(?) LIMIT 1",
+                    (str(plan_name).lower().replace(" ", "-"),),
+                ).fetchone()
+                if plan:
+                    ctx["plan_name"] = str(plan[0] or ctx["plan_name"])
+                    ctx["max_ai"] = int(plan[1] or 0)
+
+            # Consumo do período vigente da assinatura.
+            period_start = sub[2] if sub and len(sub) > 2 else None
+            period_end = sub[3] if sub and len(sub) > 3 else None
+            if sub:
+                sub_full = conn.execute(
+                    "SELECT current_period_start,current_period_end FROM subscriptions WHERE organization_id=? ORDER BY id DESC LIMIT 1",
+                    (org_id,),
+                ).fetchone()
+                if sub_full:
+                    period_start, period_end = sub_full[0], sub_full[1]
+            if period_start and period_end:
+                used = conn.execute(
+                    "SELECT COALESCE(SUM(credits_used),0) FROM ai_usage WHERE organization_id=? AND usage_date >= date(?) AND usage_date <= date(?)",
+                    (org_id, str(period_start)[:10], str(period_end)[:10]),
+                ).fetchone()[0]
+            else:
+                used = conn.execute(
+                    "SELECT COALESCE(SUM(credits_used),0) FROM ai_usage WHERE organization_id=?",
+                    (org_id,),
+                ).fetchone()[0]
+            ctx["used_ai"] = int(used or 0)
+    except Exception:
+        pass
+    return ctx
+
+
+def check_ai_quota(org_id):
+    """Retorna (permitido, contexto) sem executar o provedor de IA."""
+    ctx = get_saas_context(org_id)
+    limit = int(ctx.get("max_ai") or 0)
+    used = int(ctx.get("used_ai") or 0)
+    # Limite 0 significa ilimitado/não configurado nesta primeira camada.
+    if str(ctx.get("status", "active")).lower() not in {"active", "trialing", "trial"}:
+        return False, ctx
+    return (True, ctx) if limit <= 0 else (used < limit, ctx)
+
+
+def register_ai_usage_local(org_id, user_id, operation, metadata=None):
+    """Registra uma consulta de IA no schema SaaS atual."""
+    try:
+        now = datetime.now()
+        with get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO ai_usage(
+                    organization_id, user_id, usage_date, usage_type,
+                    model, tokens_input, tokens_output, credits_used,
+                    estimated_cost, metadata, created_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    org_id,
+                    user_id,
+                    now.date().isoformat(),
+                    operation or "chat",
+                    None,
+                    0,
+                    0,
+                    1,
+                    0,
+                    str(metadata or {}),
+                    now.isoformat(timespec="seconds"),
+                ),
+            )
+            conn.commit()
+    except Exception:
+        # O uso não deve derrubar a resposta da IA.
+        pass
+
+
+def render_saas_sidebar(org_id, user_data=None):
+    """Card SaaS compacto do tenant atual, exibido antes da navegação."""
+    ctx = get_saas_context(org_id)
+    used = int(ctx.get("used_ai") or 0)
+    limit = int(ctx.get("max_ai") or 0)
+    user_data = user_data or {}
+
+    org_name = "Minha Organização"
+    try:
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT name FROM organizations WHERE id=? LIMIT 1",
+                (org_id,),
+            ).fetchone()
+            if row and row[0]:
+                org_name = str(row[0])
+    except Exception:
+        pass
+
+    if limit > 0:
+        pct = min(used / limit, 1.0)
+        usage_text = f"{used:,} / {limit:,}"
+        pct_text = f"{pct * 100:.0f}%"
+    else:
+        pct = 0.0
+        usage_text = f"{used:,} / ∞"
+        pct_text = "Ilimitado"
+
+    status = str(ctx.get("status") or "active").lower()
+    status_label = "Ativo" if status in {"active", "trial", "trialing"} else status.title()
+
+    st.markdown(
+        f"""
+        <div class="saas-user-card">
+            <div class="saas-user-head">
+                <div class="saas-avatar">👤</div>
+                <div class="saas-user-copy">
+                    <div class="saas-greeting">Olá, {user_data.get('name', 'Usuário')}</div>
+                    <div class="saas-role">{user_data.get('role', 'Usuário')}</div>
+                </div>
+                <div class="saas-chevron">⌄</div>
+            </div>
+            <div class="saas-divider"></div>
+            <div class="saas-org-row">
+                <span class="saas-org-icon">🏢</span>
+                <span class="saas-org-name">{org_name}</span>
+                <span class="saas-plan-badge">{ctx['plan_name']}</span>
+            </div>
+            <div class="saas-divider"></div>
+            <div class="saas-usage-row">
+                <span class="saas-ai-icon">🧠</span>
+                <div class="saas-usage-copy">
+                    <div class="saas-usage-title">Consultas de IA <b>{usage_text}</b></div>
+                    <div class="saas-progress"><span style="width:{pct * 100:.1f}%"></span></div>
+                </div>
+                <span class="saas-percent">{pct_text}</span>
+            </div>
+            <div class="saas-status">● {status_label}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if limit > 0 and used >= limit:
+        st.warning("Limite de IA atingido")
+    return ctx
 
 
 def get_counts(org_id):
@@ -1333,6 +1561,9 @@ page_options = [
 # ============================================================
 
 with st.sidebar:
+    # --------------------------------------------------------
+    # MARCA
+    # --------------------------------------------------------
     st.markdown(
         """
         <div class="legal-brand">
@@ -1344,11 +1575,22 @@ with st.sidebar:
                 </div>
             </div>
         </div>
-
-        <div class="nav-group">PRINCIPAL</div>
         """,
         unsafe_allow_html=True,
     )
+
+    # --------------------------------------------------------
+    # CONTEXTO SAAS — tenant, plano e consumo
+    # --------------------------------------------------------
+    saas_ctx = render_saas_sidebar(
+        user.get("organization_id"),
+        user,
+    )
+
+    # --------------------------------------------------------
+    # PRINCIPAL — sem Super Admin aqui
+    # --------------------------------------------------------
+    st.markdown('<div class="nav-group">PRINCIPAL</div>', unsafe_allow_html=True)
 
     nav_items = [
         ("Dashboard", "🏠"),
@@ -1364,9 +1606,6 @@ with st.sidebar:
         ("Perfil", "👤"),
     ]
 
-    if str(user.get("role", "")).lower() in {"super admin", "superadmin", "administrador"}:
-        nav_items.insert(1, ("Super Admin", "👑"))
-
     page = st.session_state.page
     for nav_name, nav_icon in nav_items:
         active = "sidebar-active" if page == nav_name else ""
@@ -1381,44 +1620,66 @@ with st.sidebar:
         st.markdown("</div>", unsafe_allow_html=True)
     st.session_state.page = page
 
-    st.markdown(
-        """
-        <div class="nav-group">SISTEMA</div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    if st.button("＋  Nova conversa", use_container_width=True):
+    # Nova conversa permanece no bloco principal, antes de Sistema.
+    if st.button("💬  Nova conversa", use_container_width=True, key="nav_new_conversation"):
         st.session_state.messages = []
+        st.session_state.pending_question = None
         st.session_state.page = "Assistente IA"
         st.rerun()
 
-    st.markdown(
-        f"""
-        <div class="sidebar-profile">
-            <div class="profile-card">
-                <div class="avatar">👤</div>
-                <div>
-                    <div class="profile-name">{user.get("name", "Usuário Jurídico")}</div>
-                    <div class="profile-role">{user.get("role", "Usuário")}</div>
-                </div>
-            </div>
-            <div class="online"><span class="online-dot"></span>Sistema Online</div>
-            <div class="version">v3.1.0</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # --------------------------------------------------------
+    # SISTEMA
+    # --------------------------------------------------------
+    st.markdown('<div class="nav-group sidebar-section-title">SISTEMA</div>', unsafe_allow_html=True)
 
-    if st.button("🧹  Atualizar conexão IA", use_container_width=True):
+    if st.button("🔄  Atualizar conexão IA", use_container_width=True, key="sidebar_refresh_ai"):
         try:
             clear_ai_cache()
             st.rerun()
         except Exception as exc:
             st.error(f"Não foi possível atualizar a conexão: {exc}")
 
-    st.markdown('<div class="sidebar-danger">', unsafe_allow_html=True)
-    if st.button("🚪  Sair do sistema", use_container_width=True):
+    # --------------------------------------------------------
+    # PERFIL / STATUS
+    # --------------------------------------------------------
+    st.markdown('<div class="nav-group sidebar-section-title">ASSISTIR</div>', unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div class="sidebar-profile">
+            <div class="profile-card">
+                <div class="avatar">👤</div>
+                <div style="min-width:0;flex:1">
+                    <div class="profile-name">{user.get("name", "Usuário Jurídico")}</div>
+                    <div class="profile-role">{user.get("email", user.get("role", "Usuário"))}</div>
+                </div>
+                <div class="profile-arrow">›</div>
+            </div>
+            <div class="online"><span class="online-dot"></span>Online <span style="margin-left:auto;color:#55769e">v3.1.0</span></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # --------------------------------------------------------
+    # SUPER ADMIN — propositalmente no rodapé
+    # --------------------------------------------------------
+    if str(user.get("role", "")).lower() in {"super admin", "superadmin", "administrador"}:
+        st.markdown('<div class="super-admin-bottom">', unsafe_allow_html=True)
+        admin_active = "sidebar-admin-active" if page == "Super Admin" else ""
+        st.markdown(f'<div class="{admin_active}">', unsafe_allow_html=True)
+        if st.button(
+            "🛡️  Super Admin",
+            use_container_width=True,
+            key="nav_super_admin_bottom",
+        ):
+            st.session_state.page = "Super Admin"
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # Sair fica por último, separado da navegação funcional.
+    st.markdown('<div class="sidebar-logout-wrap">', unsafe_allow_html=True)
+    if st.button("🚪  Sair do sistema", use_container_width=True, key="sidebar_logout"):
         audit(action="logout")
         logout()
         st.rerun()
@@ -1937,6 +2198,7 @@ elif page == "Assistente IA":
                     result = call_orchestrator(
                         query=question,
                         org_id=user.get("organization_id"),
+                        user_id=user.get("id"),
                         mode=mode_map.get(selected_agent, "auto"),
                         top_k=8,
                         rerank_k=5,
@@ -2389,24 +2651,31 @@ elif page == "Riscos":
     )
     if st.button("⚡ Executar análise de risco", type="primary"):
         if q.strip():
-            with st.spinner("Executando agente de risco..."):
-                try:
-                    result = risk_analysis(
-                        q,
-                        organization_id=user.get("organization_id"),
-                    )
-                except TypeError:
+            allowed, quota_ctx = check_ai_quota(user.get("organization_id"))
+            if not allowed:
+                st.error("Limite de IA atingido para o plano atual. Faça upgrade para continuar.")
+            else:
+                with st.spinner("Executando agente de risco..."):
                     try:
-                        result = risk_analysis(q, user.get("organization_id"))
+                        result = risk_analysis(
+                            q,
+                            organization_id=user.get("organization_id"),
+                        )
+                    except TypeError:
+                        try:
+                            result = risk_analysis(q, user.get("organization_id"))
+                        except Exception as exc:
+                            result = {"answer": "", "error": str(exc)}
                     except Exception as exc:
                         result = {"answer": "", "error": str(exc)}
-                except Exception as exc:
-                    result = {"answer": "", "error": str(exc)}
 
-            if isinstance(result, dict):
-                st.markdown(result.get("answer", "Nenhum resultado retornado."))
-            else:
-                st.markdown(str(result))
+                if isinstance(result, dict):
+                    answer = str(result.get("answer", "") or "").strip()
+                    st.markdown(answer or "Nenhum resultado retornado.")
+                    if answer and not result.get("error"):
+                        register_ai_usage_local(user.get("organization_id"), user.get("id"), "risk_analysis", {})
+                else:
+                    st.markdown(str(result))
         else:
             st.warning("Informe o contexto da análise.")
     st.markdown("</div>", unsafe_allow_html=True)

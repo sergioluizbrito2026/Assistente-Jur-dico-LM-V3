@@ -1175,7 +1175,7 @@ page_options = [
    ============================================================ */
 
 [data-testid="stSidebar"] {
-    min-width: 290px !important;
+    
     max-width: 290px !important;
 
     background:

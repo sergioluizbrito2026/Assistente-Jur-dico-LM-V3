@@ -2170,12 +2170,23 @@ if page == "Super Admin":
             plan_rows = conn.execute("SELECT id,name,slug,price_monthly,max_users,max_documents,max_ai_queries,max_storage_mb,features,active,created_at FROM plans ORDER BY price_monthly,id").fetchall()
         plan_table=[]
         for p in plan_rows:
-            plan_table.append({"Plano":p[1],"Preço/mês":f'R$ {p[2]:,.2f}'.replace(',','X').replace('.',',').replace('X','.'),"Usuários":p[4],"Documentos":p[5],"Consultas IA":p[6],"Armazenamento MB":p[7],"Status":"Ativo" if p[9] else "Inativo"})
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        section_header("💳","Planos comerciais","Limites cadastrados no banco SaaS")
-        st.dataframe(pd.DataFrame(plan_table),use_container_width=True,hide_index=True)
-        st.caption("Nesta etapa, o Super Admin administra planos existentes. A criação/edição comercial de novos planos pode ser adicionada junto ao módulo de cobrança.")
-        st.markdown('</div>', unsafe_allow_html=True)
+           plan_price = float(p[2] or 0)
+
+plan_table.append({
+    "Plano": p[1],
+    "Preço/mês": f"R$ {plan_price:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+    "Usuários": p[4],
+    "Documentos": p[5],
+    "Consultas IA": p[6],
+    "Armazenamento MB": p[7],
+    "Status": "Ativo" if p[9] else "Inativo",
+})
+
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+section_header("💳", "Planos comerciais", "Limites cadastrados no banco SaaS")
+st.dataframe(pd.DataFrame(plan_table), use_container_width=True, hide_index=True)
+st.caption("Nesta etapa, o Super Admin administra planos existentes. A criação/edição comercial de novos planos pode ser adicionada junto ao módulo de cobrança.")
+st.markdown('</div>', unsafe_allow_html=True)
 
     with tab_usage:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)

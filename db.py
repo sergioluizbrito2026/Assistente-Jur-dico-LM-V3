@@ -438,14 +438,15 @@ def init_db() -> None:
                 o.created_at,
                 datetime(o.created_at, '+30 days'),
                 o.created_at,
-                now
+                ?
             FROM organizations o
             WHERE NOT EXISTS(
                 SELECT 1
                 FROM subscriptions s
                 WHERE s.organization_id = o.id
             )
-            """
+            """,
+            (now,),
         )
 
 

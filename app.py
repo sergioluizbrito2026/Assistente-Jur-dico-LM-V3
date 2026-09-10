@@ -1360,67 +1360,57 @@ if global_search and global_search.strip():
 
 
 # ============================================================
-# SUPER ADMIN
+# PLANOS — SUPER ADMIN
 # ============================================================
 
-if page == "Super Admin":
-    if str(user.get("role", "")).lower() not in {"super admin", "superadmin", "administrador"}:
-        st.error("Acesso restrito ao Super Admin.")
-        st.stop()
+plan_counts = (
+    plan_df["Plano"]
+    .fillna("Não informado")
+    .astype(str)
+    .value_counts()
+    .rename_axis("Plano")
+    .reset_index(name="Organizações")
+)
 
-    st.markdown('<div class="page-title">👑 Super Admin</div>', unsafe_allow_html=True)
-    st.markdown('<div class="page-subtitle">Visão global da plataforma, organizações e uso do SaaS.</div>', unsafe_allow_html=True)
+fig_plan = px.bar(
+    plan_counts,
+    x="Plano",
+    y="Organizações",
+    text="Organizações",
+)
 
-    with get_connection() as conn:
-        orgs = conn.execute("SELECT id,name,plan,created_at FROM organizations ORDER BY id DESC").fetchall()
-        users_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-        docs_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-        cases_count = conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0]
-        events_count = conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0]
+fig_plan.update_traces(
+    textposition="outside",
+    hovertemplate=(
+        "<b>Plano: %{x}</b><br>"
+        "Organizações: %{y}"
+        "<extra></extra>"
+    ),
+)
 
-    k1,k2,k3,k4,k5=st.columns(5)
-    for col, icon, label, value, css in [
-        (k1,"🏢","Organizações",len(orgs),"kpi-blue"),
-        (k2,"👥","Usuários",users_count,"kpi-purple"),
-        (k3,"📄","Documentos",docs_count,"kpi-teal"),
-        (k4,"⚖️","Processos",cases_count,"kpi-blue"),
-        (k5,"🛡️","Eventos",events_count,"kpi-red"),
-    ]:
-        with col: metric_card(icon,label,value,"dados globais","plataforma",""+css)
+fig_plan.update_layout(
+    height=300,
+    margin=dict(
+        l=20,
+        r=20,
+        t=30,
+        b=20,
+    ),
+    xaxis_title=None,
+    yaxis_title=None,
+    showlegend=False,
+    transition_duration=0,
+)
 
-    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    section_header("🏢","Organizações","Clientes e ambientes cadastrados")
-    rows=[]
-    with get_connection() as conn:
-        for o in orgs:
-            oid=o[0]
-            rows.append({
-                "ID":oid,"Organização":o[1],"Plano":o[2] or "Profissional",
-                "Usuários":conn.execute("SELECT COUNT(*) FROM users WHERE organization_id=?",(oid,)).fetchone()[0],
-                "Documentos":conn.execute("SELECT COUNT(*) FROM documents WHERE organization_id=?",(oid,)).fetchone()[0],
-                "Processos":conn.execute("SELECT COUNT(*) FROM cases WHERE organization_id=?",(oid,)).fetchone()[0],
-                "Criada em":o[3]
-            })
-    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
-    a,b=st.columns(2)
-    with a:
-        st.markdown('<div class="section-card">',unsafe_allow_html=True)
-        section_header("💳","Planos","Estrutura inicial de cobrança")
-        plan_df=pd.DataFrame(rows) if rows else pd.DataFrame(columns=["Organização","Plano"])
-        if not plan_df.empty:
-            st.bar_chart(plan_df["Plano"].value_counts())
-        else: st.info("Nenhuma organização cadastrada.")
-        st.markdown('</div>',unsafe_allow_html=True)
-    with b:
-        st.markdown('<div class="section-card">',unsafe_allow_html=True)
-        section_header("🔐","Governança","Isolamento por organização")
-        st.markdown("**Status:** 🟢 Estrutura multi-tenant ativa")
-        st.caption("Documentos, chunks, processos e auditoria possuem vínculo com organization_id. O próximo passo é aplicar o mesmo isolamento a todos os serviços e ao armazenamento vetorial antes de clientes externos.")
-        st.markdown('</div>',unsafe_allow_html=True)
+st.plotly_chart(
+    fig_plan,
+    use_container_width=True,
+    config={
+        "displayModeBar": False,
+        "scrollZoom": False,
+        "doubleClick": False,
+    },
+)
 
 
 # ============================================================

@@ -45,6 +45,7 @@ from services.ai_orchestrator import orchestrate, risk_analysis
 from services.ai import ai_status, clear_ai_cache
 from services.auth import authenticate, get_current_user, logout
 from services.ingestion import ingest_document
+from security.passwords import hash_password
 
 
 # ============================================================
@@ -775,6 +776,20 @@ st.markdown(
     font-size:.76rem;
 }
 
+/* ---------- SUPER ADMIN ---------- */
+.admin-hero{background:radial-gradient(circle at 95% 0%,rgba(124,58,237,.20),transparent 35%),linear-gradient(145deg,#071f4b,#06152f);border:1px solid rgba(91,126,220,.48);border-radius:18px;padding:20px;box-shadow:0 18px 40px rgba(0,0,0,.20);margin-bottom:16px}
+.admin-hero-title{font-size:1.35rem;font-weight:850}
+.admin-hero-sub{color:#8eadd2;font-size:.74rem;margin-top:5px}
+.admin-mini{border:1px solid rgba(50,118,201,.40);border-radius:14px;background:linear-gradient(145deg,rgba(7,31,70,.88),rgba(4,22,51,.88));padding:13px}
+.admin-mini-label{font-size:.66rem;color:#7f9fc5}.admin-mini-value{font-size:1.35rem;font-weight:850;margin-top:4px}
+.admin-org-card{border:1px solid rgba(45,112,197,.45);border-radius:14px;background:linear-gradient(145deg,rgba(7,31,70,.95),rgba(4,21,47,.95));padding:14px;margin-bottom:9px}
+.admin-org-name{font-size:.88rem;font-weight:800}.admin-org-meta{font-size:.65rem;color:#8ba9ca;margin-top:4px}
+.admin-status-active{color:#18dfaa;background:rgba(16,214,160,.12);border:1px solid rgba(16,214,160,.25);border-radius:999px;padding:4px 8px;font-size:.61rem;font-weight:800}
+.admin-status-suspended{color:#ff718a;background:rgba(244,63,94,.12);border:1px solid rgba(244,63,94,.25);border-radius:999px;padding:4px 8px;font-size:.61rem;font-weight:800}
+.admin-plan{color:#8ec5ff;font-weight:800}
+.admin-section{margin-top:18px}
+.admin-danger{color:#ff8da0;font-size:.7rem}
+
 /* ---------- MOBILE ---------- */
 @media(max-width:900px){
     .page-title{font-size:1.55rem}
@@ -1463,12 +1478,153 @@ def plot_status_donut(cases=None):
 
 
 # ============================================================
+# SAAS ADMIN — MIGRAÇÃO E OPERAÇÕES
+# ============================================================
+
+def ensure_saas_admin_schema():
+    """Garante os campos mínimos para gestão administrativa do SaaS."""
+    try:
+        with get_connection() as conn:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(organizations)").fetchall()}
+            if "status" not in cols:
+                conn.execute("ALTER TABLE organizations ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_organizations_status ON organizations(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_subscriptions_org_plan ON subscriptions(organization_id, plan_id)")
+            conn.commit()
+    except Exception:
+        pass
+
+
+def admin_list_organizations():
+    """Retorna uma visão consolidada de organizações, planos, limites e consumo."""
+    rows = []
+    with get_connection() as conn:
+        orgs = conn.execute(
+            "SELECT id,name,plan,created_at,COALESCE(status,'active') AS status FROM organizations ORDER BY id DESC"
+        ).fetchall()
+        for o in orgs:
+            oid = int(o[0])
+            sub = conn.execute(
+                """
+                SELECT s.id,s.status,s.current_period_start,s.current_period_end,
+                       p.id,p.name,p.slug,p.price_monthly,p.max_users,p.max_documents,p.max_ai_queries,p.max_storage_mb,p.active
+                FROM subscriptions s JOIN plans p ON p.id=s.plan_id
+                WHERE s.organization_id=? ORDER BY s.id DESC LIMIT 1
+                """,
+                (oid,),
+            ).fetchone()
+            users = int(conn.execute("SELECT COUNT(*) FROM users WHERE organization_id=?", (oid,)).fetchone()[0] or 0)
+            docs = int(conn.execute("SELECT COUNT(*) FROM documents WHERE organization_id=?", (oid,)).fetchone()[0] or 0)
+            cases = int(conn.execute("SELECT COUNT(*) FROM cases WHERE organization_id=?", (oid,)).fetchone()[0] or 0)
+            usage = float(conn.execute("SELECT COALESCE(SUM(credits_used),0) FROM ai_usage WHERE organization_id=?", (oid,)).fetchone()[0] or 0)
+            owner = conn.execute(
+                "SELECT name,email FROM users WHERE organization_id=? ORDER BY CASE WHEN LOWER(role) LIKE '%admin%' THEN 0 ELSE 1 END,id LIMIT 1",
+                (oid,),
+            ).fetchone()
+            rows.append({
+                "id": oid,
+                "name": str(o[1] or "Organização"),
+                "plan_org": str(o[2] or "Profissional"),
+                "created_at": o[3],
+                "status": str(o[4] or "active"),
+                "subscription_id": int(sub[0]) if sub else None,
+                "subscription_status": str(sub[1] or "active") if sub else "active",
+                "period_start": sub[2] if sub else None,
+                "period_end": sub[3] if sub else None,
+                "plan_id": int(sub[4]) if sub else None,
+                "plan": str(sub[5] or o[2] or "Profissional") if sub else str(o[2] or "Profissional"),
+                "slug": str(sub[6]) if sub else "",
+                "price": float(sub[7] or 0) if sub else 0.0,
+                "max_users": int(sub[8] or 0) if sub else 0,
+                "max_documents": int(sub[9] or 0) if sub else 0,
+                "max_ai": int(sub[10] or 0) if sub else 0,
+                "max_storage_mb": int(sub[11] or 0) if sub else 0,
+                "plan_active": bool(sub[12]) if sub else True,
+                "users": users,
+                "documents": docs,
+                "cases": cases,
+                "ai_used": int(usage),
+                "owner_name": str(owner[0]) if owner else "Não informado",
+                "owner_email": str(owner[1]) if owner else "Não informado",
+            })
+    return rows
+
+
+def admin_set_org_plan(org_id, plan_id):
+    """Altera plano da organização e sincroniza a assinatura vigente."""
+    with get_connection() as conn:
+        plan = conn.execute("SELECT id,name,slug FROM plans WHERE id=? AND active=1 LIMIT 1", (int(plan_id),)).fetchone()
+        if not plan:
+            raise ValueError("Plano selecionado não está disponível.")
+        now = datetime.now().isoformat(timespec="seconds")
+        conn.execute("UPDATE organizations SET plan=? WHERE id=?", (plan[1], int(org_id)))
+        sub = conn.execute("SELECT id FROM subscriptions WHERE organization_id=? ORDER BY id DESC LIMIT 1", (int(org_id),)).fetchone()
+        if sub:
+            conn.execute(
+                "UPDATE subscriptions SET plan_id=?,status='active',updated_at=? WHERE id=?",
+                (int(plan[0]), now, int(sub[0])),
+            )
+        else:
+            conn.execute(
+                """INSERT INTO subscriptions(organization_id,plan_id,status,started_at,current_period_start,current_period_end,created_at,updated_at)
+                   VALUES(?,?,?, ?,date(?),datetime(?,'+30 days'),?,?)""",
+                (int(org_id), int(plan[0]), "active", now, now, now, now, now),
+            )
+        conn.commit()
+
+
+def admin_set_org_status(org_id, status):
+    """Ativa ou suspende uma organização e sua assinatura atual."""
+    status = "suspended" if str(status).lower() in {"suspended", "suspensa", "suspenso"} else "active"
+    sub_status = "suspended" if status == "suspended" else "active"
+    with get_connection() as conn:
+        conn.execute("UPDATE organizations SET status=? WHERE id=?", (status, int(org_id)))
+        conn.execute("UPDATE subscriptions SET status=?,updated_at=? WHERE organization_id=?", (sub_status, datetime.now().isoformat(timespec="seconds"), int(org_id)))
+        conn.commit()
+
+
+def admin_create_user(org_id, name, email, password, role="Usuario"):
+    """Cria usuário respeitando o limite do plano."""
+    name = str(name or "").strip()
+    email = str(email or "").strip().lower()
+    password = str(password or "")
+    if not name or not email or len(password) < 6:
+        raise ValueError("Informe nome, e-mail e senha com pelo menos 6 caracteres.")
+    with get_connection() as conn:
+        exists = conn.execute("SELECT id FROM users WHERE LOWER(email)=? LIMIT 1", (email,)).fetchone()
+        if exists:
+            raise ValueError("Já existe um usuário com este e-mail.")
+        row = conn.execute(
+            """SELECT p.max_users FROM subscriptions s JOIN plans p ON p.id=s.plan_id
+               WHERE s.organization_id=? ORDER BY s.id DESC LIMIT 1""", (int(org_id),)
+        ).fetchone()
+        max_users = int(row[0] or 0) if row else 0
+        current = int(conn.execute("SELECT COUNT(*) FROM users WHERE organization_id=?", (int(org_id),)).fetchone()[0] or 0)
+        if max_users > 0 and current >= max_users:
+            raise ValueError(f"Limite de usuários do plano atingido ({current}/{max_users}).")
+        conn.execute(
+            "INSERT INTO users(organization_id,name,email,password_hash,role,created_at) VALUES(?,?,?,?,?,?)",
+            (int(org_id), name, email, hash_password(password), role, datetime.now().isoformat(timespec="seconds")),
+        )
+        conn.commit()
+
+
+def admin_usage_summary(rows):
+    total = sum(int(r.get("ai_used", 0)) for r in rows)
+    active = sum(1 for r in rows if r.get("status") == "active")
+    suspended = sum(1 for r in rows if r.get("status") == "suspended")
+    revenue = sum(float(r.get("price", 0)) for r in rows if r.get("status") == "active")
+    return total, active, suspended, revenue
+
+
+# ============================================================
 # DB INIT
 # ============================================================
 
 try:
     init_db()
     seed_demo()
+    ensure_saas_admin_schema()
 except Exception:
     pass
 
@@ -1789,75 +1945,201 @@ if page == "Super Admin":
         st.error("Acesso restrito ao Super Admin.")
         st.stop()
 
-    st.markdown('<div class="page-title">👑 Super Admin</div>', unsafe_allow_html=True)
-    st.markdown('<div class="page-subtitle">Visão global da plataforma, organizações e uso do SaaS.</div>', unsafe_allow_html=True)
+    rows = admin_list_organizations()
+    total_ai, active_orgs, suspended_orgs, mrr = admin_usage_summary(rows)
+    total_users = sum(int(r["users"]) for r in rows)
+    total_docs = sum(int(r["documents"]) for r in rows)
+    total_cases = sum(int(r["cases"]) for r in rows)
 
-    with get_connection() as conn:
-        orgs = conn.execute("SELECT id,name,plan,created_at FROM organizations ORDER BY id DESC").fetchall()
-        users_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-        docs_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-        cases_count = conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0]
-        events_count = conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0]
+    st.markdown(
+        f"""
+        <div class="admin-hero">
+            <div class="admin-hero-title">👑 Super Admin</div>
+            <div class="admin-hero-sub">Central de gestão do SaaS · clientes, planos, usuários, consumo e status das contas.</div>
+        </div>
+        """, unsafe_allow_html=True
+    )
 
-    k1,k2,k3,k4,k5=st.columns(5)
-    for col, icon, label, value, css in [
-        (k1,"🏢","Organizações",len(orgs),"kpi-blue"),
-        (k2,"👥","Usuários",users_count,"kpi-purple"),
-        (k3,"📄","Documentos",docs_count,"kpi-teal"),
-        (k4,"⚖️","Processos",cases_count,"kpi-blue"),
-        (k5,"🛡️","Eventos",events_count,"kpi-red"),
+    k1,k2,k3,k4,k5 = st.columns(5)
+    for col, icon, label, value, css, sub in [
+        (k1,"🏢","Organizações",len(rows),"kpi-blue","clientes cadastrados"),
+        (k2,"👥","Usuários",total_users,"kpi-purple","em todos os clientes"),
+        (k3,"📄","Documentos",total_docs,"kpi-teal","base global"),
+        (k4,"🧠","IA utilizada",total_ai,"kpi-blue","créditos consumidos"),
+        (k5,"💰","MRR estimado",f"R$ {mrr:,.2f}".replace(",","X").replace(".",",").replace("X","."),"kpi-red","planos ativos"),
     ]:
-        with col: metric_card(icon,label,value,"dados globais","plataforma",""+css)
+        with col: metric_card(icon,label,value,"","",css)
 
     st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
-    section_header("🏢","Organizações","Clientes e ambientes cadastrados")
-    rows=[]
-    with get_connection() as conn:
-        for o in orgs:
-            oid=o[0]
-            rows.append({
-                "ID":oid,"Organização":o[1],"Plano":o[2] or "Profissional",
-                "Usuários":conn.execute("SELECT COUNT(*) FROM users WHERE organization_id=?",(oid,)).fetchone()[0],
-                "Documentos":conn.execute("SELECT COUNT(*) FROM documents WHERE organization_id=?",(oid,)).fetchone()[0],
-                "Processos":conn.execute("SELECT COUNT(*) FROM cases WHERE organization_id=?",(oid,)).fetchone()[0],
-                "Criada em":o[3]
-            })
-    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
-    st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
-    a,b=st.columns(2)
-    with a:
-        st.markdown('<div class="section-card">',unsafe_allow_html=True)
-        section_header("💳","Planos","Estrutura inicial de cobrança")
-        plan_df=pd.DataFrame(rows) if rows else pd.DataFrame(columns=["Organização","Plano"])
-        if not plan_df.empty:
-            plan_counts = plan_df["Plano"].value_counts()
-            fig_plan = go.Figure(data=[go.Bar(
-                x=plan_counts.index.tolist(),
-                y=plan_counts.values.tolist(),
-                marker=dict(color="#4f8cff", line=dict(color="#8ec5ff", width=1)),
-            )])
-            fig_plan.update_layout(
-                height=230,
-                margin=dict(l=10, r=10, t=10, b=10),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#a9c0df", size=10),
-                xaxis=dict(showgrid=False, linecolor="#183e72", tickfont=dict(color="#7d9bc0")),
-                yaxis=dict(showgrid=True, gridcolor="rgba(47,88,140,.25)", tickfont=dict(color="#7d9bc0"), dtick=1),
-                showlegend=False,
-            )
-            st.plotly_chart(fig_plan, use_container_width=True, config={"displayModeBar": False})
-        else: st.info("Nenhuma organização cadastrada.")
-        st.markdown('</div>',unsafe_allow_html=True)
-    with b:
-        st.markdown('<div class="section-card">',unsafe_allow_html=True)
-        section_header("🔐","Governança","Isolamento por organização")
-        st.markdown("**Status:** 🟢 Estrutura multi-tenant ativa")
-        st.caption("Documentos, chunks, processos e auditoria possuem vínculo com organization_id. O próximo passo é aplicar o mesmo isolamento a todos os serviços e ao armazenamento vetorial antes de clientes externos.")
-        st.markdown('</div>',unsafe_allow_html=True)
+    tab_overview, tab_orgs, tab_plans, tab_usage = st.tabs(["📊 Visão geral", "🏢 Organizações", "💳 Planos & limites", "🧠 Consumo de IA"])
+
+    with tab_overview:
+        a,b,c = st.columns(3)
+        with a:
+            st.markdown('<div class="admin-mini">', unsafe_allow_html=True)
+            st.markdown('<div class="admin-mini-label">CONTAS ATIVAS</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="admin-mini-value">{active_orgs}</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+        with b:
+            st.markdown('<div class="admin-mini">', unsafe_allow_html=True)
+            st.markdown('<div class="admin-mini-label">CONTAS SUSPENSAS</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="admin-mini-value">{suspended_orgs}</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+        with c:
+            st.markdown('<div class="admin-mini">', unsafe_allow_html=True)
+            st.markdown('<div class="admin-mini-label">PROCESSOS</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="admin-mini-value">{total_cases}</div>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+        left,right = st.columns([1.35,1])
+        with left:
+            st.markdown('<div class="section-card">', unsafe_allow_html=True)
+            section_header("🏢","Clientes por plano","Distribuição atual")
+            if rows:
+                plan_counts = pd.Series([r["plan"] for r in rows]).value_counts()
+                fig = go.Figure(data=[go.Bar(x=plan_counts.index.tolist(), y=plan_counts.values.tolist(), marker=dict(color=["#1685ff","#7c3aed","#14b8a6","#f59e0b","#ec4899"][:len(plan_counts)]))])
+                fig.update_layout(height=260,margin=dict(l=8,r=8,t=10,b=8),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",font=dict(color="#a9c0df",size=10),xaxis=dict(showgrid=False),yaxis=dict(showgrid=True,gridcolor="rgba(47,88,140,.25)"),showlegend=False)
+                st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+            else:
+                st.info("Nenhuma organização cadastrada.")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with right:
+            st.markdown('<div class="section-card">', unsafe_allow_html=True)
+            section_header("🔐","Governança SaaS","Saúde operacional")
+            st.markdown(f"**Multi-tenant:** 🟢 Ativo")
+            st.markdown(f"**Contas ativas:** {active_orgs}")
+            st.markdown(f"**Contas suspensas:** {suspended_orgs}")
+            st.markdown(f"**Consumo global de IA:** {total_ai:,} créditos")
+            st.caption("Cada organização possui organization_id e seus documentos, processos e consumo de IA permanecem vinculados ao tenant.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("⚡","Ações rápidas","Operações administrativas")
+        q1,q2,q3 = st.columns(3)
+        with q1:
+            st.info("Use a aba Organizações para alterar plano, status ou criar usuários.")
+        with q2:
+            st.info("Use Planos & limites para consultar os recursos comercializados.")
+        with q3:
+            st.info("Use Consumo de IA para identificar clientes próximos da franquia.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with tab_orgs:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("🏢","Clientes / Organizações","Gestão individual dos tenants")
+        if not rows:
+            st.info("Nenhuma organização cadastrada.")
+        else:
+            table_rows=[]
+            for r in rows:
+                limit = r["max_ai"]
+                pct = (r["ai_used"] / limit * 100) if limit > 0 else 0
+                table_rows.append({
+                    "Organização":r["name"], "Plano":r["plan"], "Usuários":f'{r["users"]}/{r["max_users"]}' if r["max_users"] else f'{r["users"]}/∞',
+                    "Documentos":f'{r["documents"]}/{r["max_documents"]}' if r["max_documents"] else f'{r["documents"]}/∞',
+                    "IA":f'{r["ai_used"]:,}/{limit:,}' if limit else f'{r["ai_used"]:,}/∞',
+                    "Uso":f'{pct:.0f}%' if limit else "Ilimitado", "Status":"ATIVO" if r["status"]=="active" else "SUSPENSO", "Criada em":str(r["created_at"] or "")[:10]
+                })
+            st.dataframe(pd.DataFrame(table_rows),use_container_width=True,hide_index=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+        if rows:
+            options = {f'{r["name"]} · {r["plan"]} · ID {r["id"]}':r for r in rows}
+            selected_label = st.selectbox("Selecionar organização para administrar", list(options.keys()), key="admin_selected_org")
+            selected = options[selected_label]
+            x,y = st.columns([1.15,1])
+            with x:
+                st.markdown('<div class="section-card">', unsafe_allow_html=True)
+                section_header("⚙️","Gerenciar conta","Plano e status")
+                st.markdown(f'**Organização:** {selected["name"]}')
+                st.markdown(f'**Responsável:** {selected["owner_name"]} · {selected["owner_email"]}')
+                st.markdown(f'**Status atual:** {"🟢 Ativo" if selected["status"]=="active" else "🔴 Suspenso"}')
+                st.markdown(f'**Plano atual:** <span class="admin-plan">{selected["plan"]}</span>', unsafe_allow_html=True)
+                st.caption(f'Período: {selected["period_start"] or "—"} → {selected["period_end"] or "—"}')
+                plans = []
+                with get_connection() as conn:
+                    plans = conn.execute("SELECT id,name,price_monthly,max_users,max_documents,max_ai_queries,max_storage_mb FROM plans WHERE active=1 ORDER BY price_monthly,id").fetchall()
+                plan_labels = {f'{p[1]} · R$ {p[2]:.2f} · {p[5]} IA':p for p in plans}
+                current_label = next((label for label,p in plan_labels.items() if int(p[0])==int(selected["plan_id"] or -1)), list(plan_labels.keys())[0] if plan_labels else "")
+                new_plan_label = st.selectbox("Plano", list(plan_labels.keys()), index=list(plan_labels.keys()).index(current_label) if current_label in plan_labels else 0, key=f'admin_plan_{selected["id"]}') if plan_labels else ""
+                c1,c2 = st.columns(2)
+                with c1:
+                    if st.button("💾 Alterar plano", type="primary", use_container_width=True, key=f'admin_change_plan_{selected["id"]}'):
+                        try:
+                            admin_set_org_plan(selected["id"], plan_labels[new_plan_label][0])
+                            audit(action="admin_plan_change", details={"organization_id":selected["id"],"plan":plan_labels[new_plan_label][1]})
+                            st.success("Plano atualizado.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Não foi possível alterar o plano: {exc}")
+                with c2:
+                    target_status = "suspended" if selected["status"] == "active" else "active"
+                    label_status = "⛔ Suspender" if target_status == "suspended" else "✅ Reativar"
+                    if st.button(label_status, use_container_width=True, key=f'admin_status_{selected["id"]}'):
+                        try:
+                            admin_set_org_status(selected["id"], target_status)
+                            audit(action="admin_org_status", details={"organization_id":selected["id"],"status":target_status})
+                            st.success("Status atualizado.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Não foi possível alterar o status: {exc}")
+                st.markdown('</div>', unsafe_allow_html=True)
+            with y:
+                st.markdown('<div class="section-card">', unsafe_allow_html=True)
+                section_header("👥","Adicionar usuário","Criação respeitando o limite do plano")
+                with st.form(f'admin_add_user_form_{selected["id"]}'):
+                    new_name = st.text_input("Nome", key=f'new_user_name_{selected["id"]}')
+                    new_email = st.text_input("E-mail", key=f'new_user_email_{selected["id"]}')
+                    new_password = st.text_input("Senha inicial", type="password", key=f'new_user_password_{selected["id"]}')
+                    new_role = st.selectbox("Perfil", ["Usuario","Administrador"], key=f'new_user_role_{selected["id"]}')
+                    submitted = st.form_submit_button("Criar usuário", type="primary", use_container_width=True)
+                    if submitted:
+                        try:
+                            admin_create_user(selected["id"],new_name,new_email,new_password,new_role)
+                            audit(action="admin_user_created", details={"organization_id":selected["id"],"email":new_email})
+                            st.success("Usuário criado com sucesso.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
+                st.caption(f'Usuários: {selected["users"]}/{selected["max_users"] if selected["max_users"] else "∞"}')
+                st.markdown('</div>', unsafe_allow_html=True)
+
+    with tab_plans:
+        with get_connection() as conn:
+            plan_rows = conn.execute("SELECT id,name,slug,price_monthly,max_users,max_documents,max_ai_queries,max_storage_mb,features,active,created_at FROM plans ORDER BY price_monthly,id").fetchall()
+        plan_table=[]
+        for p in plan_rows:
+            plan_table.append({"Plano":p[1],"Preço/mês":f'R$ {p[2]:,.2f}'.replace(',','X').replace('.',',').replace('X','.'),"Usuários":p[4],"Documentos":p[5],"Consultas IA":p[6],"Armazenamento MB":p[7],"Status":"Ativo" if p[9] else "Inativo"})
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("💳","Planos comerciais","Limites cadastrados no banco SaaS")
+        st.dataframe(pd.DataFrame(plan_table),use_container_width=True,hide_index=True)
+        st.caption("Nesta etapa, o Super Admin administra planos existentes. A criação/edição comercial de novos planos pode ser adicionada junto ao módulo de cobrança.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with tab_usage:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        section_header("🧠","Consumo de IA","Clientes e utilização da franquia")
+        usage_rows=[]
+        for r in sorted(rows,key=lambda x:x["ai_used"],reverse=True):
+            limit=r["max_ai"]
+            pct=(r["ai_used"]/limit*100) if limit>0 else 0
+            remaining=max(limit-r["ai_used"],0) if limit>0 else None
+            usage_rows.append({"Organização":r["name"],"Plano":r["plan"],"Utilizado":r["ai_used"],"Limite":limit if limit else "∞","Restante":remaining if remaining is not None else "∞","Uso":f'{pct:.0f}%' if limit else "Ilimitado","Status":"ATIVO" if r["status"]=="active" else "SUSPENSO"})
+        if usage_rows:
+            st.dataframe(pd.DataFrame(usage_rows),use_container_width=True,hide_index=True)
+            usage_df=pd.DataFrame(usage_rows)
+            chart_df=usage_df[usage_df["Limite"]!="∞"].copy()
+            if not chart_df.empty:
+                fig=go.Figure(data=[go.Bar(x=chart_df["Organização"],y=chart_df["Utilizado"],name="Utilizado",marker=dict(color="#22d3ee")),go.Bar(x=chart_df["Organização"],y=chart_df["Limite"],name="Limite",marker=dict(color="#7c3aed"))])
+                fig.update_layout(barmode="group",height=300,margin=dict(l=8,r=8,t=20,b=8),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",font=dict(color="#a9c0df",size=10),xaxis=dict(showgrid=False),yaxis=dict(showgrid=True,gridcolor="rgba(47,88,140,.25)"),legend=dict(orientation="h",y=1.08))
+                st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+        else:
+            st.info("Ainda não há dados de consumo.")
+        st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ============================================================

@@ -1096,8 +1096,20 @@ def report_status_chart(cases):
     else:
         counts = df["Status"].fillna("Sem status").replace("", "Sem status").value_counts()
         labels, values = counts.index.tolist(), counts.values.tolist()
-    fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.68, textinfo="none", marker=dict(line=dict(color="#071a37", width=2)))])
-    fig.update_layout(height=260, margin=dict(l=0,r=0,t=10,b=0), paper_bgcolor="rgba(0,0,0,0)", showlegend=True, legend=dict(font=dict(color="#b9cbe3", size=10)))
+    fig = go.Figure(data=[go.Pie(
+        labels=labels, values=values, hole=.68, textinfo="none", sort=False,
+        marker=dict(
+            colors=["#1785ff", "#7c3aed", "#f59e0b", "#647da2", "#14b8a6", "#ec4899"][:len(labels)],
+            line=dict(color="#04142e", width=2.5),
+        ),
+        hovertemplate="<b>%{label}</b><br>%{value} · %{percent}<extra></extra>",
+    )])
+    fig.update_layout(
+        height=260, margin=dict(l=0, r=0, t=10, b=0),
+        paper_bgcolor="rgba(0,0,0,0)", showlegend=True,
+        legend=dict(font=dict(color="#b9cbe3", size=10)),
+        hoverlabel=dict(bgcolor="#0c2c62", bordercolor="#3b82f6", font=dict(color="#eaf4ff", size=11)),
+    )
     return fig
 
 
@@ -1108,8 +1120,20 @@ def report_category_chart(cases):
     else:
         counts = df["Categoria"].fillna("Não informada").replace("", "Não informada").value_counts().head(8)
         labels, values = counts.index.tolist(), counts.values.tolist()
-    fig = go.Figure(data=[go.Bar(x=values, y=labels, orientation="h")])
-    fig.update_layout(height=260, margin=dict(l=10,r=10,t=10,b=10), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#a9c0df", size=10), xaxis=dict(showgrid=True, gridcolor="rgba(47,88,140,.25)"), yaxis=dict(showgrid=False))
+    fig = go.Figure(data=[go.Bar(
+        x=values, y=labels, orientation="h",
+        marker=dict(color="#4f8cff", line=dict(color="#8ec5ff", width=1)),
+        hovertemplate="<b>%{y}</b><br>%{x} processo(s)<extra></extra>",
+    )])
+    fig.update_layout(
+        height=260, margin=dict(l=10, r=10, t=10, b=10),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#a9c0df", size=10),
+        xaxis=dict(showgrid=True, gridcolor="rgba(47,88,140,.18)", fixedrange=True),
+        yaxis=dict(showgrid=False, fixedrange=True),
+        dragmode=False,
+        hoverlabel=dict(bgcolor="#0c2c62", bordercolor="#3b82f6", font=dict(color="#eaf4ff", size=11)),
+    )
     return fig
 
 def plot_dark_line(cases=None):
@@ -1137,17 +1161,37 @@ def plot_dark_line(cases=None):
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=x, y=y, mode="lines+markers",
-        line=dict(color="#4f8cff", width=3, shape="spline"),
-        marker=dict(color="#8ec5ff", size=7),
-        fill="tozeroy", fillcolor="rgba(37,99,235,.20)",
-        hovertemplate="%{x}: %{y} processo(s)<extra></extra>",
+        line=dict(color="#4f8cff", width=3.2, shape="spline", smoothing=1.1),
+        marker=dict(
+            color="#0b1c3d", size=8,
+            line=dict(color="#8ec5ff", width=2),
+        ),
+        fill="tozeroy", fillcolor="rgba(37,99,235,.22)",
+        hovertemplate="<b>%{y} processo(s)</b><br>%{x}<extra></extra>",
     ))
-    fig.update_layout(height=235, margin=dict(l=8,r=8,t=10,b=5),
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#91a8c8", size=10),
-        xaxis=dict(showgrid=False, linecolor="#183e72", tickfont=dict(color="#7d9bc0")),
-        yaxis=dict(showgrid=True, gridcolor="rgba(47,88,140,.25)", zeroline=False, tickfont=dict(color="#7d9bc0"), dtick=1),
-        showlegend=False)
+    fig.update_layout(
+        height=235,
+        margin=dict(l=8, r=8, t=14, b=5),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#91a8c8", size=10, family="Inter, sans-serif"),
+        xaxis=dict(
+            showgrid=False, linecolor="#183e72", tickfont=dict(color="#7d9bc0"),
+            fixedrange=True, showspikes=True, spikemode="across",
+            spikethickness=1, spikecolor="rgba(79,140,255,.35)", spikedash="dot",
+        ),
+        yaxis=dict(
+            showgrid=True, gridcolor="rgba(47,88,140,.18)", zeroline=False,
+            tickfont=dict(color="#7d9bc0"), dtick=1, fixedrange=True,
+        ),
+        showlegend=False,
+        dragmode=False,
+        hovermode="x unified",
+        hoverlabel=dict(
+            bgcolor="#0c2c62", bordercolor="#3b82f6",
+            font=dict(color="#eaf4ff", size=11, family="Inter, sans-serif"),
+        ),
+    )
     return fig
 
 
@@ -1162,12 +1206,31 @@ def plot_status_donut(cases=None):
         counts = df["Status"].fillna("Sem status").replace("", "Sem status").value_counts()
         labels, values = counts.index.tolist(), counts.values.tolist()
         total = int(sum(values))
-    fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.68, textinfo="none",
-        marker=dict(colors=["#1785ff","#7c3aed","#f59e0b","#647da2","#14b8a6","#ec4899"][:len(labels)],
-                    line=dict(color="#071a37", width=2)),
-        hovertemplate="%{label}: %{value} processo(s) · %{percent}<extra></extra>")])
-    fig.update_layout(height=220, margin=dict(l=0,r=0,t=0,b=0), paper_bgcolor="rgba(0,0,0,0)", showlegend=False,
-        annotations=[dict(text=f"<b>{total}</b><br><span style='font-size:10px'>Total</span>", x=.5,y=.5,showarrow=False,font=dict(color="#fff",size=21))])
+    fig = go.Figure(data=[go.Pie(
+        labels=labels, values=values, hole=.72, textinfo="none",
+        sort=False,
+        marker=dict(
+            colors=["#1785ff", "#7c3aed", "#f59e0b", "#647da2", "#14b8a6", "#ec4899"][:len(labels)],
+            line=dict(color="#04142e", width=3),
+        ),
+        pull=[0.02] * len(labels),
+        hovertemplate="<b>%{label}</b><br>%{value} processo(s) · %{percent}<extra></extra>",
+    )])
+    fig.update_layout(
+        height=220,
+        margin=dict(l=0, r=0, t=0, b=0),
+        paper_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+        font=dict(family="Inter, sans-serif"),
+        hoverlabel=dict(
+            bgcolor="#0c2c62", bordercolor="#3b82f6",
+            font=dict(color="#eaf4ff", size=11, family="Inter, sans-serif"),
+        ),
+        annotations=[dict(
+            text=f"<b style='font-size:26px'>{total}</b><br><span style='font-size:10px;letter-spacing:.06em'>TOTAL</span>",
+            x=.5, y=.5, showarrow=False, font=dict(color="#eaf4ff"),
+        )],
+    )
     return fig
 
 
@@ -1596,7 +1659,7 @@ if page == "Dashboard":
         st.plotly_chart(
             plot_dark_line(dashboard_cases),
             use_container_width=True,
-            config={"displayModeBar": False},
+            config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False},
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1610,7 +1673,7 @@ if page == "Dashboard":
             st.plotly_chart(
                 plot_status_donut(dashboard_cases),
                 use_container_width=True,
-                config={"displayModeBar": False},
+                config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False},
             )
             st.markdown(
                 """
@@ -2471,12 +2534,12 @@ elif page == "Relatórios":
     with g1:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         section_header("📊", "Processos por categoria", "Distribuição da carteira atual")
-        st.plotly_chart(report_category_chart(filtered_cases), use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(report_category_chart(filtered_cases), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
         st.markdown("</div>", unsafe_allow_html=True)
     with g2:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         section_header("🧭", "Processos por status", "Situação atual da carteira")
-        st.plotly_chart(report_status_chart(filtered_cases), use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(report_status_chart(filtered_cases), use_container_width=True, config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)

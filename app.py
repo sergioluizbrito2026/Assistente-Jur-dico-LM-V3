@@ -1,4 +1,3 @@
-
 """
 Assistente Jurídico IA SaaS V3.1
 Interface premium — Dark Legal Tech
@@ -114,54 +113,117 @@ st.markdown(
     background:transparent;
 }
 
-/* ---------- SIDEBAR ---------- */
+/* ---------- SIDEBAR BASE ---------- */
 [data-testid="stSidebar"]{
     background:
-        radial-gradient(circle at 20% 0%,rgba(37,99,235,.18),transparent 28%),
-        linear-gradient(180deg,#031127 0%,#041a3c 58%,#03132e 100%);
-    border-right:1px solid #153d70;
+        radial-gradient(circle at 20% 0%,rgba(37,99,235,.16),transparent 30%),
+        linear-gradient(180deg,#030f24 0%,#041b3f 55%,#020d20 100%);
+    border-right:1px solid rgba(28,74,132,.55);
+    box-shadow:6px 0 28px rgba(0,0,0,.28);
 }
 
 [data-testid="stSidebar"] > div:first-child{
     padding-top:1rem;
 }
 
-/* ---------- SIDEBAR PREMIUM V3.2 ---------- */
+/* ---------- SIDEBAR PREMIUM V3.3 ---------- */
 [data-testid="stSidebar"]{
-    min-width:290px !important;
-    max-width:290px !important;
+    min-width:296px !important;
+    max-width:296px !important;
 }
 [data-testid="stSidebar"] > div:first-child{
-    padding:1rem .85rem 1.5rem !important;
+    padding:1.1rem .9rem 1.4rem !important;
 }
-[data-testid="stSidebar"] .stButton{ margin:5px 0 !important; }
+
+/* leve separador de scroll no topo/rodapé */
+[data-testid="stSidebarUserContent"]{
+    scrollbar-width:thin;
+    scrollbar-color:rgba(59,130,246,.35) transparent;
+}
+[data-testid="stSidebarUserContent"]::-webkit-scrollbar{ width:6px; }
+[data-testid="stSidebarUserContent"]::-webkit-scrollbar-thumb{
+    background:rgba(59,130,246,.35);
+    border-radius:10px;
+}
+
+[data-testid="stSidebar"] .stButton{ margin:4px 0 !important; }
+
 [data-testid="stSidebar"] .stButton > button{
-    min-height:44px !important;
+    min-height:46px !important;
     border-radius:12px !important;
-    border:1px solid rgba(61,132,224,.28) !important;
-    background:linear-gradient(180deg,rgba(10,39,82,.92),rgba(5,25,57,.92)) !important;
-    color:#eef6ff !important;
-    font-weight:650 !important;
+    border:1px solid rgba(58,120,201,.20) !important;
+    background:linear-gradient(180deg,rgba(12,42,88,.55),rgba(6,26,58,.55)) !important;
+    color:#dce8fb !important;
+    font-weight:600 !important;
+    font-size:.855rem !important;
     text-align:left !important;
-    padding:8px 13px !important;
-    box-shadow:0 6px 18px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.045) !important;
-    transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease !important;
+    padding:9px 14px !important;
+    letter-spacing:.01em;
+    box-shadow:
+        0 1px 0 rgba(255,255,255,.03) inset,
+        0 8px 18px -10px rgba(0,0,0,.55) !important;
+    transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease, background .16s ease, color .16s ease !important;
 }
+
+[data-testid="stSidebar"] .stButton > button p{
+    font-size:.855rem !important;
+    font-weight:600 !important;
+}
+
 [data-testid="stSidebar"] .stButton > button:hover{
-    transform:translateX(3px) !important;
-    border-color:rgba(48,145,255,.75) !important;
-    box-shadow:0 9px 24px rgba(0,102,255,.24), inset 0 1px 0 rgba(255,255,255,.06) !important;
+    transform:translateX(2px) !important;
+    border-color:rgba(70,150,255,.55) !important;
+    background:linear-gradient(180deg,rgba(30,68,132,.75),rgba(14,38,78,.75)) !important;
+    color:#ffffff !important;
+    box-shadow:
+        0 1px 0 rgba(255,255,255,.05) inset,
+        0 10px 24px -8px rgba(20,90,220,.45) !important;
 }
+
+[data-testid="stSidebar"] .stButton > button:active{
+    transform:translateX(1px) scale(.99) !important;
+}
+
+[data-testid="stSidebar"] .stButton > button:focus:not(:active){
+    box-shadow:
+        0 0 0 2px rgba(59,130,246,.35),
+        0 8px 18px -10px rgba(0,0,0,.55) !important;
+}
+
+/* botão da página ativa */
 [data-testid="stSidebar"] .sidebar-active .stButton > button{
-    background:linear-gradient(90deg,#075fe6,#124cc4) !important;
-    border-color:#2188ff !important;
-    box-shadow:0 9px 26px rgba(0,100,255,.34) !important;
+    background:linear-gradient(90deg,#0b63e8,#1447b8) !important;
+    border-color:rgba(101,169,255,.65) !important;
+    color:#ffffff !important;
+    box-shadow:
+        0 1px 0 rgba(255,255,255,.10) inset,
+        0 10px 26px -6px rgba(10,95,230,.55) !important;
 }
+[data-testid="stSidebar"] .sidebar-active .stButton > button:hover{
+    transform:translateX(2px) !important;
+}
+
+/* item de "sair" com tom de alerta sutil */
+[data-testid="stSidebar"] .sidebar-danger .stButton > button{
+    border-color:rgba(244,63,94,.22) !important;
+    background:linear-gradient(180deg,rgba(70,17,29,.45),rgba(40,10,18,.45)) !important;
+    color:#ffb4c2 !important;
+}
+[data-testid="stSidebar"] .sidebar-danger .stButton > button:hover{
+    border-color:rgba(244,63,94,.55) !important;
+    background:linear-gradient(180deg,rgba(120,22,42,.6),rgba(64,14,26,.6)) !important;
+    box-shadow:
+        0 1px 0 rgba(255,255,255,.05) inset,
+        0 10px 22px -8px rgba(244,63,94,.45) !important;
+    color:#fff !important;
+}
+
 .sidebar-section-space{
     margin-top:16px;
     padding-top:10px;
     border-top:1px solid rgba(62,111,173,.24);
 }
+
 .top-search-wrap [data-testid="stTextInput"] input{
     height:42px !important;
     border-radius:13px !important;
@@ -244,55 +306,74 @@ st.markdown(
 
 /* ---------- SIDEBAR BRAND ---------- */
 .legal-brand{
-    padding:4px 4px 18px;
-    border-bottom:1px solid rgba(62,111,173,.35);
-    margin-bottom:16px;
+    padding:6px 8px 18px;
+    border-bottom:1px solid rgba(62,111,173,.30);
+    margin-bottom:14px;
 }
 
 .legal-brand-row{
     display:flex;
     align-items:center;
-    gap:11px;
+    gap:12px;
 }
 
 .legal-logo{
-    width:45px;
-    height:45px;
+    width:46px;
+    height:46px;
     display:flex;
     align-items:center;
     justify-content:center;
-    font-size:27px;
-    border-radius:13px;
+    font-size:26px;
+    border-radius:14px;
     background:linear-gradient(145deg,#f8c94d,#b77717);
-    box-shadow:0 8px 24px rgba(245,158,11,.20);
+    box-shadow:
+        0 1px 0 rgba(255,255,255,.35) inset,
+        0 10px 22px -6px rgba(245,158,11,.45);
 }
 
 .legal-title{
-    font-size:1.08rem;
+    font-size:1.06rem;
     font-weight:800;
     letter-spacing:-.02em;
+    line-height:1.2;
 }
 
 .legal-sub{
-    margin-top:2px;
+    margin-top:3px;
     color:#7eb8ff;
-    font-size:.68rem;
+    font-size:.67rem;
+    font-weight:600;
+    letter-spacing:.02em;
 }
 
 /* ---------- GROUP LABELS ---------- */
 .nav-group{
-    color:#4fa4ff;
-    font-size:.66rem;
+    color:#5b9eff;
+    font-size:.64rem;
     font-weight:800;
-    letter-spacing:.10em;
-    margin:15px 6px 7px;
+    letter-spacing:.12em;
+    margin:18px 6px 8px;
+    opacity:.85;
 }
 
 /* ---------- PROFILE ---------- */
 .sidebar-profile{
-    border-top:1px solid rgba(62,111,173,.35);
-    margin-top:18px;
-    padding-top:16px;
+    border-top:1px solid rgba(62,111,173,.30);
+    margin-top:16px;
+    padding-top:14px;
+}
+
+.profile-card{
+    display:flex;
+    align-items:center;
+    gap:11px;
+    padding:10px 12px;
+    border-radius:14px;
+    border:1px solid rgba(58,120,201,.22);
+    background:linear-gradient(160deg,rgba(14,44,90,.55),rgba(7,26,56,.55));
+    box-shadow:
+        0 1px 0 rgba(255,255,255,.03) inset,
+        0 10px 22px -12px rgba(0,0,0,.6);
 }
 
 .profile-row{
@@ -302,31 +383,45 @@ st.markdown(
 }
 
 .avatar{
-    width:38px;
-    height:38px;
+    width:40px;
+    height:40px;
     border-radius:50%;
     display:flex;
     align-items:center;
     justify-content:center;
     background:linear-gradient(145deg,#1e5fd5,#102f70);
-    border:1px solid #2c6bc4;
+    border:1px solid rgba(96,165,250,.55);
     font-size:19px;
+    box-shadow:0 0 0 3px rgba(37,99,235,.14), 0 6px 16px -6px rgba(0,0,0,.6);
+    flex-shrink:0;
 }
 
-.profile-name{font-size:.82rem;font-weight:750}
-.profile-role{font-size:.67rem;color:#8ba8ca}
+.profile-name{font-size:.82rem;font-weight:750;line-height:1.25}
+.profile-role{font-size:.66rem;color:#8ba8ca;margin-top:1px}
 .online{
-    margin-top:5px;
+    display:flex;
+    align-items:center;
+    gap:5px;
+    margin-top:9px;
     color:#12dca5;
-    font-size:.67rem;
+    font-size:.66rem;
     font-weight:700;
+}
+.online-dot{
+    width:6px;
+    height:6px;
+    border-radius:50%;
+    background:#12dca5;
+    box-shadow:0 0 0 3px rgba(18,220,165,.18);
+    display:inline-block;
 }
 
 .version{
-    color:#6683a8;
+    color:#5c7ea6;
     text-align:right;
-    font-size:.64rem;
-    margin-top:12px;
+    font-size:.63rem;
+    margin-top:10px;
+    letter-spacing:.03em;
 }
 
 /* ---------- TOP SEARCH ---------- */
@@ -1236,16 +1331,16 @@ with st.sidebar:
         st.rerun()
 
     st.markdown(
-        """
+        f"""
         <div class="sidebar-profile">
-            <div class="profile-row">
+            <div class="profile-card">
                 <div class="avatar">👤</div>
                 <div>
                     <div class="profile-name">{user.get("name", "Usuário Jurídico")}</div>
                     <div class="profile-role">{user.get("role", "Usuário")}</div>
                 </div>
             </div>
-            <div class="online">● Sistema Online</div>
+            <div class="online"><span class="online-dot"></span>Sistema Online</div>
             <div class="version">v3.1.0</div>
         </div>
         """,
@@ -1259,10 +1354,12 @@ with st.sidebar:
         except Exception as exc:
             st.error(f"Não foi possível atualizar a conexão: {exc}")
 
+    st.markdown('<div class="sidebar-danger">', unsafe_allow_html=True)
     if st.button("🚪  Sair do sistema", use_container_width=True):
         audit(action="logout")
         logout()
         st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ============================================================

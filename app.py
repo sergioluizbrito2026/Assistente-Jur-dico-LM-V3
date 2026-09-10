@@ -1360,57 +1360,79 @@ if global_search and global_search.strip():
 
 
 # ============================================================
-# PLANOS — SUPER ADMIN
+# PLANOS
 # ============================================================
 
-plan_counts = (
-    plan_df["Plano"]
-    .fillna("Não informado")
-    .astype(str)
-    .value_counts()
-    .rename_axis("Plano")
-    .reset_index(name="Organizações")
-)
+st.markdown("### 💳 Planos")
+st.caption("Estrutura inicial de cobrança")
 
-fig_plan = px.bar(
-    plan_counts,
-    x="Plano",
-    y="Organizações",
-    text="Organizações",
-)
+# Criar DataFrame de planos
+with get_connection() as conn:
+    plan_df = pd.read_sql_query(
+        """
+        SELECT
+            COALESCE(plan, 'Não informado') AS Plano
+        FROM organizations
+        ORDER BY id
+        """,
+        conn,
+    )
 
-fig_plan.update_traces(
-    textposition="outside",
-    hovertemplate=(
-        "<b>Plano: %{x}</b><br>"
-        "Organizações: %{y}"
-        "<extra></extra>"
-    ),
-)
+# Gráfico somente depois de criar plan_df
+if not plan_df.empty:
 
-fig_plan.update_layout(
-    height=300,
-    margin=dict(
-        l=20,
-        r=20,
-        t=30,
-        b=20,
-    ),
-    xaxis_title=None,
-    yaxis_title=None,
-    showlegend=False,
-    transition_duration=0,
-)
+    plan_counts = (
+        plan_df["Plano"]
+        .fillna("Não informado")
+        .astype(str)
+        .value_counts()
+        .rename_axis("Plano")
+        .reset_index(name="Organizações")
+    )
 
-st.plotly_chart(
-    fig_plan,
-    use_container_width=True,
-    config={
-        "displayModeBar": False,
-        "scrollZoom": False,
-        "doubleClick": False,
-    },
-)
+    fig_plan = px.bar(
+        plan_counts,
+        x="Plano",
+        y="Organizações",
+        text="Organizações",
+    )
+
+    fig_plan.update_traces(
+        textposition="outside",
+        hovertemplate=(
+            "<b>Plano: %{x}</b><br>"
+            "Organizações: %{y}"
+            "<extra></extra>"
+        ),
+    )
+
+    fig_plan.update_layout(
+        height=300,
+        margin=dict(
+            l=20,
+            r=20,
+            t=30,
+            b=20,
+        ),
+        xaxis_title=None,
+        yaxis_title=None,
+        showlegend=False,
+        transition_duration=0,
+    )
+
+    st.plotly_chart(
+        fig_plan,
+        use_container_width=True,
+        config={
+            "displayModeBar": False,
+            "scrollZoom": False,
+            "doubleClick": False,
+        },
+    )
+
+else:
+
+    st.info("Nenhuma organização cadastrada.")
 
 
 # ============================================================

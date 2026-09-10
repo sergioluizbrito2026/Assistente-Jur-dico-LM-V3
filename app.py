@@ -1157,7 +1157,6 @@ if "pending_question" not in st.session_state:
 
 page_options = [
     "Dashboard",
-    "Super Admin",
     "Assistente IA",
     "Documentos",
     "Processos",

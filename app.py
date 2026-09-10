@@ -1509,7 +1509,23 @@ if page == "Super Admin":
         section_header("💳","Planos","Estrutura inicial de cobrança")
         plan_df=pd.DataFrame(rows) if rows else pd.DataFrame(columns=["Organização","Plano"])
         if not plan_df.empty:
-            st.bar_chart(plan_df["Plano"].value_counts())
+            plan_counts = plan_df["Plano"].value_counts()
+            fig_plan = go.Figure(data=[go.Bar(
+                x=plan_counts.index.tolist(),
+                y=plan_counts.values.tolist(),
+                marker=dict(color="#4f8cff", line=dict(color="#8ec5ff", width=1)),
+            )])
+            fig_plan.update_layout(
+                height=230,
+                margin=dict(l=10, r=10, t=10, b=10),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#a9c0df", size=10),
+                xaxis=dict(showgrid=False, linecolor="#183e72", tickfont=dict(color="#7d9bc0")),
+                yaxis=dict(showgrid=True, gridcolor="rgba(47,88,140,.25)", tickfont=dict(color="#7d9bc0"), dtick=1),
+                showlegend=False,
+            )
+            st.plotly_chart(fig_plan, use_container_width=True, config={"displayModeBar": False})
         else: st.info("Nenhuma organização cadastrada.")
         st.markdown('</div>',unsafe_allow_html=True)
     with b:

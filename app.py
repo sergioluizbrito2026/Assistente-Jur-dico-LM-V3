@@ -1618,15 +1618,72 @@ def admin_usage_summary(rows):
 
 
 # ============================================================
-# DB INIT
+# DB INIT / BOOTSTRAP SAAS
 # ============================================================
 
+def ensure_demo_login():
+    """Garante que o login demonstrativo exista no primeiro deploy."""
+    demo_email = "admin@demo.local"
+    demo_password = "admin123"
+
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id,password_hash FROM users WHERE LOWER(email)=? LIMIT 1",
+            (demo_email,),
+        ).fetchone()
+
+        if not row:
+            org = conn.execute(
+                "SELECT id FROM organizations WHERE id=1 LIMIT 1"
+            ).fetchone()
+            if not org:
+                raise RuntimeError("Organização demo não foi criada pelo seed.")
+
+            conn.execute(
+                """
+                INSERT INTO users(organization_id,name,email,password_hash,role,created_at)
+                VALUES(?,?,?,?,?,?)
+                """,
+                (
+                    int(org[0]),
+                    "Dr. João Silva",
+                    demo_email,
+                    hash_password(demo_password),
+                    "Administrador",
+                    datetime.now().isoformat(timespec="seconds"),
+                ),
+            )
+            conn.commit()
+            return
+
+        try:
+            from security.passwords import verify_password
+            password_ok = verify_password(demo_password, str(row[1] or ""))
+        except Exception:
+            password_ok = False
+
+        if not password_ok:
+            conn.execute(
+                "UPDATE users SET password_hash=? WHERE id=?",
+                (hash_password(demo_password), int(row[0])),
+            )
+            conn.commit()
+
+
+DB_INIT_ERROR = None
 try:
     init_db()
     seed_demo()
     ensure_saas_admin_schema()
-except Exception:
-    pass
+    ensure_demo_login()
+except Exception as exc:
+    DB_INIT_ERROR = f"{type(exc).__name__}: {exc}"
+
+if DB_INIT_ERROR:
+    st.error("Não foi possível inicializar o banco de dados do SaaS.")
+    st.code(DB_INIT_ERROR)
+    st.info("O aplicativo foi interrompido para evitar que um erro de banco apareça como 'Credenciais inválidas'.")
+    st.stop()
 
 
 # ============================================================

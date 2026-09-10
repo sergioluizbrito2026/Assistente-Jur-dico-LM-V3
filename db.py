@@ -240,6 +240,215 @@ def init_db() -> None:
         )
 
 
+        # ==========================================================
+        # SAAS — PLANOS
+        # ==========================================================
+
+        c.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS plans(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                slug TEXT NOT NULL UNIQUE,
+                price_monthly REAL NOT NULL DEFAULT 0,
+                max_users INTEGER NOT NULL DEFAULT 1,
+                max_documents INTEGER NOT NULL DEFAULT 10,
+                max_ai_queries INTEGER NOT NULL DEFAULT 100,
+                max_storage_mb INTEGER NOT NULL DEFAULT 500,
+                features TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS subscriptions(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                organization_id INTEGER NOT NULL,
+                plan_id INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'trial',
+                started_at TEXT NOT NULL,
+                current_period_start TEXT,
+                current_period_end TEXT,
+                trial_ends_at TEXT,
+                canceled_at TEXT,
+                external_customer_id TEXT,
+                external_subscription_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+
+                FOREIGN KEY(organization_id)
+                    REFERENCES organizations(id)
+                    ON DELETE CASCADE,
+
+                FOREIGN KEY(plan_id)
+                    REFERENCES plans(id)
+                    ON DELETE RESTRICT
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_usage(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                organization_id INTEGER NOT NULL,
+                user_id INTEGER,
+                usage_date TEXT NOT NULL,
+                usage_type TEXT NOT NULL DEFAULT 'chat',
+                model TEXT,
+                tokens_input INTEGER NOT NULL DEFAULT 0,
+                tokens_output INTEGER NOT NULL DEFAULT 0,
+                credits_used REAL NOT NULL DEFAULT 1,
+                estimated_cost REAL NOT NULL DEFAULT 0,
+                metadata TEXT,
+                created_at TEXT NOT NULL,
+
+                FOREIGN KEY(organization_id)
+                    REFERENCES organizations(id)
+                    ON DELETE CASCADE,
+
+                FOREIGN KEY(user_id)
+                    REFERENCES users(id)
+                    ON DELETE SET NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_plans_slug
+                ON plans(slug);
+
+            CREATE INDEX IF NOT EXISTS idx_plans_active
+                ON plans(active);
+
+            CREATE INDEX IF NOT EXISTS idx_subscriptions_org
+                ON subscriptions(organization_id);
+
+            CREATE INDEX IF NOT EXISTS idx_subscriptions_status
+                ON subscriptions(status);
+
+            CREATE INDEX IF NOT EXISTS idx_subscriptions_period
+                ON subscriptions(current_period_end);
+
+            CREATE INDEX IF NOT EXISTS idx_ai_usage_org
+                ON ai_usage(organization_id);
+
+            CREATE INDEX IF NOT EXISTS idx_ai_usage_user
+                ON ai_usage(user_id);
+
+            CREATE INDEX IF NOT EXISTS idx_ai_usage_date
+                ON ai_usage(usage_date);
+
+            CREATE INDEX IF NOT EXISTS idx_ai_usage_org_date
+                ON ai_usage(organization_id, usage_date);
+            """
+        )
+
+        # ==========================================================
+        # SAAS — SEED DOS PLANOS
+        # ==========================================================
+
+        now = datetime.now().isoformat(timespec="seconds")
+
+        default_plans = [
+            (
+                "Trial", "trial", 0.0, 1, 10, 100, 250,
+                '{"assistente_ia":true,"rag":true,"analise_risco":false,"processos":true}',
+            ),
+            (
+                "Essencial", "essencial", 49.90, 1, 50, 100, 1000,
+                '{"assistente_ia":true,"rag":true,"analise_risco":false,"processos":true}',
+            ),
+            (
+                "Profissional", "profissional", 149.90, 5, 250, 500, 5000,
+                '{"assistente_ia":true,"rag":true,"analise_risco":true,"processos":true,"avaliacao_rag":true}',
+            ),
+            (
+                "Escritório", "escritorio", 299.90, 10, 1000, 1500, 20000,
+                '{"assistente_ia":true,"rag":true,"analise_risco":true,"processos":true,"avaliacao_rag":true,"recursos_avancados":true}',
+            ),
+            (
+                "Enterprise", "enterprise", 0.0, 100, 10000, 10000, 100000,
+                '{"assistente_ia":true,"rag":true,"analise_risco":true,"processos":true,"avaliacao_rag":true,"recursos_avancados":true,"suporte_prioritario":true}',
+            ),
+        ]
+
+        for (
+            plan_name,
+            slug,
+            price,
+            max_users,
+            max_documents,
+            max_ai_queries,
+            max_storage_mb,
+            features,
+        ) in default_plans:
+            c.execute(
+                """
+                INSERT OR IGNORE INTO plans(
+                    name,
+                    slug,
+                    price_monthly,
+                    max_users,
+                    max_documents,
+                    max_ai_queries,
+                    max_storage_mb,
+                    features,
+                    active,
+                    created_at
+                )
+                VALUES(?,?,?,?,?,?,?,?,1,?)
+                """,
+                (
+                    plan_name,
+                    slug,
+                    price,
+                    max_users,
+                    max_documents,
+                    max_ai_queries,
+                    max_storage_mb,
+                    features,
+                    now,
+                ),
+            )
+
+        # Organizações existentes recebem uma assinatura caso ainda não tenham.
+        c.execute(
+            """
+            INSERT INTO subscriptions(
+                organization_id,
+                plan_id,
+                status,
+                started_at,
+                current_period_start,
+                current_period_end,
+                created_at,
+                updated_at
+            )
+            SELECT
+                o.id,
+                COALESCE(
+                    (
+                        SELECT p.id
+                        FROM plans p
+                        WHERE LOWER(p.slug) = LOWER(REPLACE(o.plan, ' ', '-'))
+                        LIMIT 1
+                    ),
+                    (
+                        SELECT p.id
+                        FROM plans p
+                        WHERE p.slug = 'profissional'
+                        LIMIT 1
+                    )
+                ),
+                'active',
+                o.created_at,
+                o.created_at,
+                datetime(o.created_at, '+30 days'),
+                o.created_at,
+                now
+            FROM organizations o
+            WHERE NOT EXISTS(
+                SELECT 1
+                FROM subscriptions s
+                WHERE s.organization_id = o.id
+            )
+            """
+        )
+
+
 # ============================================================
 # ORGANIZAÇÃO
 # ============================================================

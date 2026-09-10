@@ -28,6 +28,7 @@ from typing import Any, Dict
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import plotly.express as px
 
 from db import init_db, seed_demo, get_connection
 from services.audit import audit

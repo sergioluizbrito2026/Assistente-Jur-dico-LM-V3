@@ -28,7 +28,6 @@ from typing import Any, Dict
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-import plotly.express as px
 
 from db import init_db, seed_demo, get_connection
 from services.audit import audit
@@ -1157,6 +1156,7 @@ if "pending_question" not in st.session_state:
 
 page_options = [
     "Dashboard",
+    "Super Admin",
     "Assistente IA",
     "Documentos",
     "Processos",
@@ -1170,311 +1170,99 @@ page_options = [
 ]
 
 
-/* ============================================================
-   SIDEBAR PREMIUM V3.3
-   ============================================================ */
-
-[data-testid="stSidebar"] {
-    
-    max-width: 290px !important;
-
-    background:
-        radial-gradient(
-            circle at 15% 0%,
-            rgba(37, 99, 235, 0.18),
-            transparent 30%
-        ),
-        linear-gradient(
-            180deg,
-            #031127 0%,
-            #041a3c 55%,
-            #021027 100%
-        ) !important;
-
-    border-right: 1px solid rgba(47, 112, 190, 0.38);
-}
-
-[data-testid="stSidebar"] > div:first-child {
-    padding: 1rem 0.85rem 1.4rem !important;
-}
-
-/* ============================================================
-   BOTÕES DA SIDEBAR
-   ============================================================ */
-
-[data-testid="stSidebar"] .stButton {
-    margin: 4px 0 !important;
-}
-
-/* botão normal */
-[data-testid="stSidebar"] .stButton > button {
-    width: 100% !important;
-    min-height: 44px !important;
-
-    border-radius: 12px !important;
-
-    border: 1px solid rgba(61, 132, 224, 0.25) !important;
-
-    background:
-        linear-gradient(
-            180deg,
-            rgba(10, 39, 82, 0.96),
-            rgba(5, 25, 57, 0.96)
-        ) !important;
-
-    color: #edf6ff !important;
-
-    font-size: 0.84rem !important;
-    font-weight: 650 !important;
-
-    text-align: left !important;
-
-    padding: 8px 13px !important;
-
-    box-shadow:
-        0 5px 14px rgba(0, 0, 0, 0.24),
-        inset 0 1px 0 rgba(255, 255, 255, 0.045) !important;
-
-    transition:
-        background 0.15s ease,
-        border-color 0.15s ease,
-        box-shadow 0.15s ease !important;
-
-    transform: none !important;
-}
-
-/* ============================================================
-   HOVER
-   IMPORTANTE:
-   NÃO usar translateX.
-   Assim o botão não fica "mexendo".
-   ============================================================ */
-
-[data-testid="stSidebar"] .stButton > button:hover {
-    transform: none !important;
-
-    background:
-        linear-gradient(
-            180deg,
-            rgba(14, 54, 108, 0.98),
-            rgba(7, 34, 76, 0.98)
-        ) !important;
-
-    border-color: rgba(49, 140, 255, 0.78) !important;
-
-    box-shadow:
-        0 7px 20px rgba(0, 93, 220, 0.22),
-        inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
-}
-
-/* ============================================================
-   BOTÃO ATIVO
-   ============================================================ */
-
-[data-testid="stSidebar"] .sidebar-active .stButton > button {
-    transform: none !important;
-
-    background:
-        linear-gradient(
-            100deg,
-            #075fe6 0%,
-            #124cc4 100%
-        ) !important;
-
-    border: 1px solid #318cff !important;
-
-    color: #ffffff !important;
-
-    box-shadow:
-        0 8px 24px rgba(0, 91, 230, 0.34),
-        inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
-}
-
-[data-testid="stSidebar"] .sidebar-active .stButton > button:hover {
-    transform: none !important;
-
-    background:
-        linear-gradient(
-            100deg,
-            #0969f4 0%,
-            #1558d5 100%
-        ) !important;
-
-    border-color: #55a2ff !important;
-
-    box-shadow:
-        0 9px 27px rgba(0, 100, 255, 0.38),
-        inset 0 1px 0 rgba(255, 255, 255, 0.14) !important;
-}
-
-/* ============================================================
-   CLICK / FOCUS
-   ============================================================ */
-
-[data-testid="stSidebar"] .stButton > button:focus {
-    outline: none !important;
-
-    box-shadow:
-        0 0 0 2px rgba(49, 140, 255, 0.16),
-        0 7px 20px rgba(0, 80, 220, 0.22) !important;
-}
-
-[data-testid="stSidebar"] .stButton > button:active {
-    transform: none !important;
-}
-
-/* ============================================================
-   TÍTULOS DOS GRUPOS
-   ============================================================ */
-
-.nav-group {
-    color: #55a8ff !important;
-
-    font-size: 0.64rem !important;
-    font-weight: 800 !important;
-
-    letter-spacing: 0.12em;
-
-    margin: 16px 6px 7px;
-
-    padding-bottom: 4px;
-
-    text-transform: uppercase;
-}
-
-/* ============================================================
-   SEPARADOR
-   ============================================================ */
-
-.sidebar-divider {
-    height: 1px;
-
-    margin: 12px 4px;
-
-    background:
-        linear-gradient(
-            90deg,
-            transparent,
-            rgba(66, 123, 190, 0.42),
-            transparent
-        );
-}
-
-/* ============================================================
-   NOVA CONVERSA
-   ============================================================ */
-
-[data-testid="stSidebar"] .new-conversation .stButton > button {
-    background:
-        linear-gradient(
-            135deg,
-            rgba(17, 77, 151, 0.95),
-            rgba(10, 48, 104, 0.95)
-        ) !important;
-
-    border-color: rgba(70, 155, 255, 0.48) !important;
-
-    box-shadow:
-        0 8px 22px rgba(0, 85, 200, 0.24),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
-}
-
-/* ============================================================
-   PERFIL
-   ============================================================ */
-
-.sidebar-profile {
-    border-top: 1px solid rgba(62, 111, 173, 0.32);
-
-    margin-top: 18px;
-
-    padding-top: 16px;
-}
-
-.profile-row {
-    display: flex;
-
-    align-items: center;
-
-    gap: 10px;
-}
-
-.avatar {
-    width: 40px;
-    height: 40px;
-
-    border-radius: 50%;
-
-    display: flex;
-
-    align-items: center;
-    justify-content: center;
-
-    background:
-        linear-gradient(
-            145deg,
-            #1e63dc,
-            #102f70
-        );
-
-    border: 1px solid #3677d1;
-
-    box-shadow:
-        0 6px 18px rgba(0, 75, 180, 0.28);
-
-    font-size: 18px;
-}
-
-.profile-name {
-    font-size: 0.82rem;
-    font-weight: 750;
-}
-
-.profile-role {
-    font-size: 0.67rem;
-    color: #8ba8ca;
-}
-
-.online {
-    margin-top: 6px;
-
-    color: #12dca5;
-
-    font-size: 0.67rem;
-    font-weight: 700;
-}
-
-.version {
-    color: #6683a8;
-
-    text-align: right;
-
-    font-size: 0.62rem;
-
-    margin-top: 10px;
-}
-
-/* ============================================================
-   SCROLLBAR DA SIDEBAR
-   ============================================================ */
-
-[data-testid="stSidebar"] ::-webkit-scrollbar {
-    width: 5px;
-}
-
-[data-testid="stSidebar"] ::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-[data-testid="stSidebar"] ::-webkit-scrollbar-thumb {
-    background: rgba(55, 112, 181, 0.42);
-
-    border-radius: 10px;
-}
-
-[data-testid="stSidebar"] ::-webkit-scrollbar-thumb:hover {
-    background: rgba(65, 142, 225, 0.65);
-}
+# ============================================================
+# SIDEBAR PREMIUM
+# ============================================================
+
+with st.sidebar:
+    st.markdown(
+        """
+        <div class="legal-brand">
+            <div class="legal-brand-row">
+                <div class="legal-logo">⚖️</div>
+                <div>
+                    <div class="legal-title">Assistente Jurídico IA</div>
+                    <div class="legal-sub">Inteligência Artificial v3.1</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="nav-group">PRINCIPAL</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    nav_items = [
+        ("Dashboard", "🏠"),
+        ("Assistente IA", "🤖"),
+        ("Documentos", "📄"),
+        ("Processos", "⚖️"),
+        ("Riscos", "🛡️"),
+        ("Prazos", "📅"),
+        ("Relatórios", "📊"),
+        ("Base de Conhecimento", "🗄️"),
+        ("Configurações", "⚙️"),
+        ("Auditoria", "🛡️"),
+        ("Perfil", "👤"),
+    ]
+
+    if str(user.get("role", "")).lower() in {"super admin", "superadmin", "administrador"}:
+        nav_items.insert(1, ("Super Admin", "👑"))
+
+    page = st.session_state.page
+    for nav_name, nav_icon in nav_items:
+        active = "sidebar-active" if page == nav_name else ""
+        st.markdown(f'<div class="{active}">', unsafe_allow_html=True)
+        if st.button(
+            f"{nav_icon}  {nav_name}",
+            key=f"nav_{nav_name}",
+            use_container_width=True,
+        ):
+            st.session_state.page = nav_name
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+    st.session_state.page = page
+
+    st.markdown(
+        """
+        <div class="nav-group">SISTEMA</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if st.button("＋  Nova conversa", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.page = "Assistente IA"
+        st.rerun()
+
+    st.markdown(
+        """
+        <div class="sidebar-profile">
+            <div class="profile-row">
+                <div class="avatar">👤</div>
+                <div>
+                    <div class="profile-name">{user.get("name", "Usuário Jurídico")}</div>
+                    <div class="profile-role">{user.get("role", "Usuário")}</div>
+                </div>
+            </div>
+            <div class="online">● Sistema Online</div>
+            <div class="version">v3.1.0</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if st.button("🧹  Atualizar conexão IA", use_container_width=True):
+        try:
+            clear_ai_cache()
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Não foi possível atualizar a conexão: {exc}")
+
+    if st.button("🚪  Sair do sistema", use_container_width=True):
+        audit(action="logout")
+        logout()
+        st.rerun()
 
 
 # ============================================================
@@ -1570,6 +1358,69 @@ if global_search and global_search.strip():
     st.markdown("</div>", unsafe_allow_html=True)
 
 
+
+# ============================================================
+# SUPER ADMIN
+# ============================================================
+
+if page == "Super Admin":
+    if str(user.get("role", "")).lower() not in {"super admin", "superadmin", "administrador"}:
+        st.error("Acesso restrito ao Super Admin.")
+        st.stop()
+
+    st.markdown('<div class="page-title">👑 Super Admin</div>', unsafe_allow_html=True)
+    st.markdown('<div class="page-subtitle">Visão global da plataforma, organizações e uso do SaaS.</div>', unsafe_allow_html=True)
+
+    with get_connection() as conn:
+        orgs = conn.execute("SELECT id,name,plan,created_at FROM organizations ORDER BY id DESC").fetchall()
+        users_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        docs_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        cases_count = conn.execute("SELECT COUNT(*) FROM cases").fetchone()[0]
+        events_count = conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0]
+
+    k1,k2,k3,k4,k5=st.columns(5)
+    for col, icon, label, value, css in [
+        (k1,"🏢","Organizações",len(orgs),"kpi-blue"),
+        (k2,"👥","Usuários",users_count,"kpi-purple"),
+        (k3,"📄","Documentos",docs_count,"kpi-teal"),
+        (k4,"⚖️","Processos",cases_count,"kpi-blue"),
+        (k5,"🛡️","Eventos",events_count,"kpi-red"),
+    ]:
+        with col: metric_card(icon,label,value,"dados globais","plataforma",""+css)
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    section_header("🏢","Organizações","Clientes e ambientes cadastrados")
+    rows=[]
+    with get_connection() as conn:
+        for o in orgs:
+            oid=o[0]
+            rows.append({
+                "ID":oid,"Organização":o[1],"Plano":o[2] or "Profissional",
+                "Usuários":conn.execute("SELECT COUNT(*) FROM users WHERE organization_id=?",(oid,)).fetchone()[0],
+                "Documentos":conn.execute("SELECT COUNT(*) FROM documents WHERE organization_id=?",(oid,)).fetchone()[0],
+                "Processos":conn.execute("SELECT COUNT(*) FROM cases WHERE organization_id=?",(oid,)).fetchone()[0],
+                "Criada em":o[3]
+            })
+    st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+    a,b=st.columns(2)
+    with a:
+        st.markdown('<div class="section-card">',unsafe_allow_html=True)
+        section_header("💳","Planos","Estrutura inicial de cobrança")
+        plan_df=pd.DataFrame(rows) if rows else pd.DataFrame(columns=["Organização","Plano"])
+        if not plan_df.empty:
+            st.bar_chart(plan_df["Plano"].value_counts())
+        else: st.info("Nenhuma organização cadastrada.")
+        st.markdown('</div>',unsafe_allow_html=True)
+    with b:
+        st.markdown('<div class="section-card">',unsafe_allow_html=True)
+        section_header("🔐","Governança","Isolamento por organização")
+        st.markdown("**Status:** 🟢 Estrutura multi-tenant ativa")
+        st.caption("Documentos, chunks, processos e auditoria possuem vínculo com organization_id. O próximo passo é aplicar o mesmo isolamento a todos os serviços e ao armazenamento vetorial antes de clientes externos.")
+        st.markdown('</div>',unsafe_allow_html=True)
 
 
 # ============================================================
